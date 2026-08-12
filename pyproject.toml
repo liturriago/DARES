@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dares"
+version = "0.1.0"
+description = "Domain Adaptation via alpha-Renyi Entropy for Semantic Segmentation"
+authors = [{ name = "Lucas Iturriago", email = "liturriago@unal.edu.co" }]
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision",
+    "pydantic>=2.0.0",
+    "pyyaml",
+    "numpy",
+    "h5py",
+    "matplotlib",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+    "mypy",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v -ra"
+
+[tool.setuptools.packages.find]
+where = ["src"]
