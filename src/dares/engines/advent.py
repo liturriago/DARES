@@ -90,7 +90,11 @@ class ADVENTTrainer(BaseTrainer):
         running_adv = 0.0
         running_ent = 0.0
 
-        pbar = tqdm(range(num_batches), desc="ADVENT Train")
+        pbar = tqdm(
+            range(num_batches),
+            desc=f"Train ({self.config.method})",
+            leave=False,
+        )
         for _ in pbar:
             imgs_s, masks_s = next(src_iter)
             imgs_t, _ = next(tgt_iter)

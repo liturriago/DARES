@@ -140,7 +140,19 @@ def test_print_summary(capsys):
     assert "Forest" in out
     assert "Non-Forest" in out
     assert "mIoU" in out
-    assert "MCC" in out
+    assert "0.7346" in out  # mIoU value
+    assert "0.8465" in out  # mean DICE value
+    assert "Overall Acc" not in out
+    assert "MCC" not in out
+
+
+def test_full_metrics_still_expose_oa_and_mcc():
+    """OA and MCC remain available in the metrics dict for record keeping."""
+    labels = torch.tensor([0] * 60 + [1] * 40, dtype=torch.long)
+    preds = torch.tensor([0] * 50 + [1] * 10 + [0] * 5 + [1] * 35, dtype=torch.long)
+    metrics = MetricTracker.compute_full_metrics(preds, labels, 2)
+    assert metrics["overall_acc"] == pytest.approx(0.85)
+    assert metrics["mcc"] == pytest.approx(0.69752, abs=1e-4)
 
 
 def test_device_consistency():

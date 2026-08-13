@@ -98,8 +98,12 @@ class CBSTTrainer(BaseTrainer):
         self_loss = 0.0
         start_time = time.time()
 
-        tqdm_iter = tqdm(range(num_batches), desc="CBST train", leave=False)
-        for step in tqdm_iter:
+        pbar = tqdm(
+            range(num_batches),
+            desc=f"Train ({self.config.method})",
+            leave=False,
+        )
+        for step in pbar:
             imgs_s, masks_s = next(src_iter)
             imgs_t, _ = next(tgt_iter)
             imgs_s = imgs_s.to(self.device)
@@ -144,9 +148,7 @@ class CBSTTrainer(BaseTrainer):
                 self.scaler.update()
 
             self.optimizer.zero_grad(set_to_none=True)
-            tqdm_iter.set_postfix(
-                ce=ce_loss / (step + 1), self_=self_loss / (step + 1)
-            )
+            pbar.set_postfix(loss=f"{loss_total.item():.4f}")
 
         epoch_time = time.time() - start_time
         denom = max(num_batches, 1)

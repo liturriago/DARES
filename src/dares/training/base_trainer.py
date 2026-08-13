@@ -203,7 +203,9 @@ class BaseTrainer(ABC):
             train_metrics = self.train_epoch()
             epoch_time = train_metrics.pop("epoch_time", 0.0)
             loss_str = " | ".join(
-                f"{k}: {v:.4f}" for k, v in train_metrics.items()
+                f"{k}: {v:.4f}"
+                for k, v in train_metrics.items()
+                if "loss" in k
             )
             print(f"[Train] Time: {format_time(epoch_time)} | {loss_str}")
             for key, value in train_metrics.items():

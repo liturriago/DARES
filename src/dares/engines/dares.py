@@ -105,7 +105,12 @@ class DARESTrainer(BaseTrainer):
         valid_classes = 0
         start_time = time.time()
 
-        for _ in tqdm(range(num_batches), desc="DARES train", leave=False):
+        pbar = tqdm(
+            range(num_batches),
+            desc=f"Train ({self.config.method})",
+            leave=False,
+        )
+        for _ in pbar:
             imgs_s, masks_s = next(src_iter)
             imgs_t, _ = next(tgt_iter)
             imgs_s = imgs_s.to(self.device)
@@ -127,6 +132,7 @@ class DARESTrainer(BaseTrainer):
                     feats_s, masks_s, feats_t, logits_t
                 )
             total = loss_ce - lambda_active * alignment
+            pbar.set_postfix(loss=f"{total.item():.4f}")
 
             self.scaler.scale(total).backward()
             self.scaler.step(self.optimizer)

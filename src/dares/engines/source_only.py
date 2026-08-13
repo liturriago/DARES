@@ -78,9 +78,12 @@ class SourceOnlyTrainer(BaseTrainer):
         total_pixels = 0
         start_time = time.time()
 
-        for batch in tqdm(
-            self.source_loaders["train"], desc="Source train", leave=False
-        ):
+        pbar = tqdm(
+            self.source_loaders["train"],
+            desc=f"Train ({self.config.method})",
+            leave=False,
+        )
+        for batch in pbar:
             imgs, masks = batch[0].to(self.device), batch[1].to(self.device)
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 logits = self.model(imgs, mode="class")
@@ -97,6 +100,7 @@ class SourceOnlyTrainer(BaseTrainer):
             self.scaler.step(self.optimizer)
             self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
 
         epoch_time = time.time() - start_time
         if total_pixels == 0:

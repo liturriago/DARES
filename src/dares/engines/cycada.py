@@ -124,7 +124,12 @@ class CyCADATrainer(BaseTrainer):
         }
         epoch_start = time.time()
 
-        for _ in tqdm(range(num_batches), desc="CyCADA"):
+        pbar = tqdm(
+            range(num_batches),
+            desc=f"Train ({self.config.method})",
+            leave=False,
+        )
+        for _ in pbar:
             self.optimizer.zero_grad()
             self.optimizer_gen.zero_grad()
             self.optimizer_dpix.zero_grad()
@@ -198,6 +203,7 @@ class CyCADATrainer(BaseTrainer):
             sums["loss_identity"] += float(loss_idt.detach())
             sums["loss_pix_adv"] += float(loss_pix_adv.detach())
             sums["loss_feat_adv"] += float(loss_feat_adv.detach())
+            pbar.set_postfix(loss=f"{total.item():.4f}")
 
         metrics = {key: value / num_batches for key, value in sums.items()}
         metrics["epoch_time"] = time.time() - epoch_start

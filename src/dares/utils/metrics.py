@@ -265,7 +265,4 @@ class MetricTracker:
             f"{'mIoU':<18}{metrics['mIoU']:>10.4f}"
             f"{metrics['mean_dice']:>10.4f}"
         )
-        print(
-            f"Overall Acc: {metrics['overall_acc']:.4f}    "
-            f"MCC: {metrics['mcc']:.4f}"
-        )
+        print("=" * width)
