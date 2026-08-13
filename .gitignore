@@ -10,7 +10,7 @@ __pycache__/
 *.pth
 *.onnx
 outputs/
-data/
+/data/
 
 # Environments
 .venv/
