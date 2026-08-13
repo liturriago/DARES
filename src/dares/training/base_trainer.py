@@ -114,25 +114,32 @@ class BaseTrainer(ABC):
 
         Applies the AMP scaler to ``loss``, backpropagates, and (when
         ``config.grad_clip`` is set) unscales the gradients and clips their
-        global norm before stepping. Clipping stabilizes adversarial methods
-        whose gradients can explode through the discriminator.
+        global norm before stepping. If any gradient is non-finite (NaN / inf)
+        the step is skipped to avoid corrupting the weights. Clipping and the
+        finiteness guard stabilize adversarial methods whose gradients can
+        explode or NaN through the discriminator.
 
         Args:
             loss (torch.Tensor): Loss to backpropagate.
             optimizer (optim.Optimizer): Optimizer to step.
-            params (Any | None): Parameters to clip; defaults to all optimizer
-                parameters.
+            params (Any | None): Parameters to check / clip; defaults to all
+                optimizer parameters.
         """
         self.scaler.scale(loss).backward()
+        if params is None:
+            params = [
+                p
+                for group in optimizer.param_groups
+                for p in group["params"]
+            ]
+        if not all(
+            p.grad is None or torch.isfinite(p.grad).all() for p in params
+        ):
+            self.optimizer.zero_grad(set_to_none=True)
+            return
         clip = self.config.grad_clip
         if clip is not None and clip > 0.0:
             self.scaler.unscale_(optimizer)
-            if params is None:
-                params = [
-                    p
-                    for group in optimizer.param_groups
-                    for p in group["params"]
-                ]
             torch.nn.utils.clip_grad_norm_(params, float(clip))
         self.scaler.step(optimizer)
 

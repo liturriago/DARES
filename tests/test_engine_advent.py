@@ -154,6 +154,22 @@ def test_train_epoch_finite_metrics(make_model, loaders):
     assert metrics["epoch_time"] >= 0.0
 
 
+def test_backward_step_skips_nan_gradients(make_model, loaders):
+    """_backward_step skips the optimizer step when gradients are NaN."""
+    engine = _make_engine(make_model(), loaders)
+    param = next(engine.model.parameters())
+    weight_before = param.detach().clone()
+
+    engine.optimizer.zero_grad(set_to_none=True)
+    param.grad = torch.full_like(param, float("nan"))
+    loss = (param * 0.0).sum()  # finite gradient (0), keeps the NaN grad
+    engine._backward_step(loss, engine.optimizer, engine.model.parameters())
+
+    assert torch.equal(param.detach(), weight_before), (
+        "weights must not be updated on NaN gradients"
+    )
+
+
 def test_advent_grad_clip_stable(make_model, loaders):
     """With grad_clip enabled the adversarial training stays finite."""
     source_loaders, target_loaders = loaders
