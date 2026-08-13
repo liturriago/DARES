@@ -117,12 +117,16 @@ class DARESTrainer(BaseTrainer):
             ):
                 feats_s, logits_s = self.model(imgs_s, mode="both")
                 feats_t, logits_t = self.model(imgs_t, mode="both")
-
                 loss_ce = self.criterion(logits_s, masks_s)
+
+            # The Renyi alignment is computed outside autocast (and internally
+            # in float32): the Gram-matrix trace normalizations are precision
+            # sensitive and must not run in float16.
+            with autocast(device_type=self.device.type, enabled=False):
                 alignment, rmetrics = self.renyi_loss(
                     feats_s, masks_s, feats_t, logits_t
                 )
-                total = loss_ce - lambda_active * alignment
+            total = loss_ce - lambda_active * alignment
 
             self.scaler.scale(total).backward()
             self.scaler.step(self.optimizer)

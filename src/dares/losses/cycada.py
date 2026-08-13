@@ -183,7 +183,7 @@ class PatchDiscriminator(nn.Module):
         Returns:
             torch.Tensor: Patch logits of shape ``(B, 1, H/8, W/8)``.
         """
-        return self.convs(x)
+        return self.convs(x.float())
 
 
 def cycle_consistency_loss(

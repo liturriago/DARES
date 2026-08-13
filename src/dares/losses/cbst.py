@@ -61,7 +61,7 @@ class CBSTPseudoLabeling(nn.Module):
             selected pixels (per class, the top ``topk_ratio`` confident
             candidates above ``threshold``) and ``0.0`` elsewhere.
         """
-        probs = F.softmax(logits, dim=1)
+        probs = F.softmax(logits.float(), dim=1)
         pseudo = torch.argmax(probs, dim=1)
         conf = probs.max(dim=1).values
 

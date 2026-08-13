@@ -29,7 +29,7 @@ def entropy_map(logits: torch.Tensor) -> torch.Tensor:
         (nats), where ``1`` denotes maximal uncertainty and ``0`` perfect
         confidence.
     """
-    p = F.softmax(logits, dim=1)
+    p = F.softmax(logits.float(), dim=1)
     ent = -(p * (p + _EPS).log()).sum(dim=1, keepdim=True)
     return ent
 

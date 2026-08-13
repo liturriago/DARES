@@ -50,6 +50,7 @@ class DomainDiscriminator(nn.Module):
         Returns:
             torch.Tensor: Domain logits of shape ``(B,)``.
         """
+        x = x.float()
         features = self.convs(x)
         pooled = features.mean(dim=(2, 3))
         return self.fc(pooled).squeeze(-1)

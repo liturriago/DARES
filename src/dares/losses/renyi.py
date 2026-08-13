@@ -220,6 +220,14 @@ class RenyiLoss(nn.Module):
         device = features_s.device
         B, D, H, W = features_s.shape
 
+        # Compute the kernel-based estimator in float32 for numerical stability
+        # (the Gram-matrix trace normalizations are precision sensitive under
+        # AMP, where model features arrive as float16).
+        features_s = features_s.float()
+        features_t = features_t.float()
+        labels_s = labels_s.long()
+        logits_t = logits_t.float()
+
         feats_s_flat = features_s.permute(0, 2, 3, 1).reshape(-1, D)
         labels_flat = labels_s.reshape(-1)
 
