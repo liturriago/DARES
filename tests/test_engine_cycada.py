@@ -90,6 +90,7 @@ def build_engine(source_loaders, target_loaders) -> CyCADATrainer:
         lambda_identity=0.1,
         lambda_pixel=1.0,
         lambda_feat=1.0,
+        grad_clip=5.0,
         device="cpu",
         use_amp=False,
         seed=42,

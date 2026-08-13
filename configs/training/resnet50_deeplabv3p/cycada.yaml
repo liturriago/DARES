@@ -26,6 +26,7 @@ training:
   warmup_epochs: 5
   lambda_pixel: 1.0
   lambda_feat: 1.0
+  grad_clip: 5.0
   lambda_cycle: 1.0
   lambda_identity: 0.1
 experiment:

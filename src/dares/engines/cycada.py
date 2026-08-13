@@ -191,8 +191,13 @@ class CyCADATrainer(BaseTrainer):
                 )
 
             self.scaler.scale(total).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.step(self.optimizer_gen)
+            gen_params = list(self.g_st.parameters()) + list(
+                self.g_ts.parameters()
+            )
+            if self._guard_step(self.optimizer, self.model.parameters()):
+                self.scaler.step(self.optimizer)
+            if self._guard_step(self.optimizer_gen, gen_params):
+                self.scaler.step(self.optimizer_gen)
 
             # --- PatchGAN discriminator step ---------------------------------
             with autocast(device_type=self.device.type, enabled=self.use_amp):
@@ -202,7 +207,8 @@ class CyCADATrainer(BaseTrainer):
                 )
                 loss_dpix = patch_discriminator_loss(d_real, d_fake)
             self.scaler.scale(loss_dpix).backward()
-            self.scaler.step(self.optimizer_dpix)
+            if self._guard_step(self.optimizer_dpix, self.d_pix.parameters()):
+                self.scaler.step(self.optimizer_dpix)
 
             # --- Feature discriminator step ----------------------------------
             with autocast(device_type=self.device.type, enabled=self.use_amp):
@@ -211,7 +217,8 @@ class CyCADATrainer(BaseTrainer):
                     self.d_feat(feats_t.detach()),
                 )
             self.scaler.scale(loss_dfeat).backward()
-            self.scaler.step(self.optimizer_dfeat)
+            if self._guard_step(self.optimizer_dfeat, self.d_feat.parameters()):
+                self.scaler.step(self.optimizer_dfeat)
 
             self.scaler.update()
 

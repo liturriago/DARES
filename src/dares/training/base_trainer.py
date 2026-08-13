@@ -112,12 +112,9 @@ class BaseTrainer(ABC):
     ) -> None:
         """Backpropagates, optionally clips, and steps an optimizer.
 
-        Applies the AMP scaler to ``loss``, backpropagates, and (when
-        ``config.grad_clip`` is set) unscales the gradients and clips their
-        global norm before stepping. If any gradient is non-finite (NaN / inf)
-        the step is skipped to avoid corrupting the weights. Clipping and the
-        finiteness guard stabilize adversarial methods whose gradients can
-        explode or NaN through the discriminator.
+        Applies the AMP scaler to ``loss``, backpropagates, and delegates to
+        :meth:`_guard_step` before stepping. See ``_guard_step`` for the
+        finiteness / clipping semantics.
 
         Args:
             loss (torch.Tensor): Loss to backpropagate.
@@ -126,6 +123,33 @@ class BaseTrainer(ABC):
                 optimizer parameters.
         """
         self.scaler.scale(loss).backward()
+        if self._guard_step(optimizer, params):
+            self.scaler.step(optimizer)
+
+    def _guard_step(
+        self,
+        optimizer: optim.Optimizer,
+        params: Any | None = None,
+    ) -> bool:
+        """Checks gradient finiteness, optionally clips, and reports safety.
+
+        Must be called after the loss for ``optimizer`` has been backpropagated
+        (i.e. gradients are already populated). If any gradient is non-finite
+        (NaN / inf) the accumulated gradients are cleared and ``False`` is
+        returned so the caller skips the optimizer step. When
+        ``config.grad_clip`` is set the gradients are unscaled (AMP) and their
+        global norm clipped. This stabilizes adversarial methods whose
+        gradients can explode or NaN through a discriminator.
+
+        Args:
+            optimizer (optim.Optimizer): Optimizer whose gradients are checked.
+            params (Any | None): Parameters to check / clip; defaults to all
+                optimizer parameters.
+
+        Returns:
+            bool: ``True`` when the step is safe, ``False`` when gradients are
+                non-finite (already cleared).
+        """
         if params is None:
             params = [
                 p
@@ -136,12 +160,12 @@ class BaseTrainer(ABC):
             p.grad is None or torch.isfinite(p.grad).all() for p in params
         ):
             self.optimizer.zero_grad(set_to_none=True)
-            return
+            return False
         clip = self.config.grad_clip
         if clip is not None and clip > 0.0:
             self.scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(params, float(clip))
-        self.scaler.step(optimizer)
+        return True
 
     @staticmethod
     def _dual_iterators(
