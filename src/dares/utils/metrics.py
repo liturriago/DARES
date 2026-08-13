@@ -262,7 +262,7 @@ class MetricTracker:
             )
         print("-" * width)
         print(
-            f"{'mIoU':<18}{metrics['mIoU']:>10.4f}"
+            f"{'mean':<18}{metrics['mIoU']:>10.4f}"
             f"{metrics['mean_dice']:>10.4f}"
         )
         print("=" * width)
