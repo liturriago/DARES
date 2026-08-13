@@ -139,7 +139,7 @@ def test_print_summary(capsys):
     out = capsys.readouterr().out
     assert "Forest" in out
     assert "Non-Forest" in out
-    assert "mIoU" in out
+    assert "mean" in out  # aggregate row label (mIoU + mean DICE)
     assert "0.7346" in out  # mIoU value
     assert "0.8465" in out  # mean DICE value
     assert "Overall Acc" not in out

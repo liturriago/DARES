@@ -141,6 +141,47 @@ def test_train_epoch_returns_finite_scalars(loaders):
         assert math.isfinite(value)
 
 
+def test_feat_adv_disabled_during_warmup(loaders):
+    """During the warm-up the feature-adversarial term is excluded from total."""
+    source_loaders, target_loaders = loaders
+    torch.manual_seed(42)
+    model = build_model(
+        ModelConfig(
+            backbone="resnet50",
+            head="resunet",
+            in_channels=4,
+            num_classes=2,
+            pretrained=False,
+        )
+    )
+    config = TrainConfig(
+        method="cycada",
+        epochs=1,
+        lr=1e-4,
+        lambda_cycle=1.0,
+        lambda_identity=0.1,
+        lambda_pixel=1.0,
+        lambda_feat=1.0,
+        warmup_epochs=5,
+        device="cpu",
+        use_amp=False,
+        seed=42,
+    )
+    engine = CyCADATrainer(
+        model, source_loaders, target_loaders, config, torch.device("cpu")
+    )
+
+    metrics = engine.train_epoch()
+
+    expected = (
+        metrics["loss_task"]
+        + 1.0 * metrics["loss_cycle"]
+        + 0.1 * metrics["loss_identity"]
+        + 1.0 * metrics["loss_pix_adv"]
+    )
+    assert metrics["loss_total"] == pytest.approx(expected, rel=1e-3)
+
+
 def test_generators_change_pixels(loaders):
     """After one epoch the generators no longer map images to themselves."""
     source_loaders, target_loaders = loaders

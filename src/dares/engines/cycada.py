@@ -89,14 +89,16 @@ class CyCADATrainer(BaseTrainer):
         self.optimizer_dfeat = self._make_optimizer(
             self.d_feat.parameters(), lr=config.lr_d
         )
+        self._epoch_idx = 0
 
     def train_epoch(self) -> dict[str, float]:
         """Runs a single CyCADA training epoch.
 
         Per iteration: a joint generator + segmenter step (task loss on the
-        translated source, cycle / identity / pixel-adversarial / feature-
-        adversarial terms), followed by PatchGAN and feature discriminator
-        steps. The scaler is updated once after all four optimizers.
+        original source AND the translated source, cycle / identity / pixel-
+        adversarial terms, plus feature-adversarial once the warm-up ends),
+        followed by PatchGAN and feature discriminator steps. The scaler is
+        updated once after all four optimizers.
 
         Returns:
             dict[str, float]: Averaged scalar metrics for the epoch including
@@ -142,6 +144,17 @@ class CyCADATrainer(BaseTrainer):
             masks_s = masks_s.to(self.device) if masks_s is not None else None
 
             # --- Generator + segmenter step ---------------------------------
+            # Feature alignment is disabled during the warm-up (backbone
+            # frozen, model not yet segmenting): aligning its features only
+            # pushes it to a trivial domain-invariant solution.
+            feat_lambda = (
+                0.0
+                if (
+                    self.config.warmup_epochs is not None
+                    and self._epoch_idx < self.config.warmup_epochs
+                )
+                else self.config.lambda_feat
+            )
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 x_st = self.g_st(imgs_s)
                 x_ts = self.g_ts(imgs_t)
@@ -151,15 +164,20 @@ class CyCADATrainer(BaseTrainer):
                 )
                 loss_idt = identity_loss(self.g_st, self.g_ts, imgs_s, imgs_t)
 
+                # Task loss anchored on BOTH the original and the translated
+                # source, so the segmenter learns from real source imagery and
+                # the generator cannot "hack" the task.
+                feats_s, logits_s = self.model(imgs_s, mode="both")
                 logits_st = self.model(x_st, mode="class")
-                loss_task = self.criterion(logits_st, masks_s)
+                loss_task = self.criterion(
+                    logits_s, masks_s
+                ) + self.criterion(logits_st, masks_s)
 
                 loss_pix_adv = patch_adversarial_loss(
                     self.d_pix(x_st)
                 ) + patch_adversarial_loss(self.d_pix(x_ts))
 
-                feats_s = self.model(imgs_s, mode="feature")
-                feats_t = self.model(imgs_t, mode="feature")
+                feats_t, _ = self.model(imgs_t, mode="both")
                 _, loss_feat_adv = adversarial_loss(
                     self.d_feat(feats_s), self.d_feat(feats_t)
                 )
@@ -169,7 +187,7 @@ class CyCADATrainer(BaseTrainer):
                     + self.config.lambda_cycle * loss_cycle
                     + self.config.lambda_identity * loss_idt
                     + self.config.lambda_pixel * loss_pix_adv
-                    + self.config.lambda_feat * loss_feat_adv
+                    + feat_lambda * loss_feat_adv
                 )
 
             self.scaler.scale(total).backward()
@@ -207,4 +225,5 @@ class CyCADATrainer(BaseTrainer):
 
         metrics = {key: value / num_batches for key, value in sums.items()}
         metrics["epoch_time"] = time.time() - epoch_start
+        self._epoch_idx += 1
         return metrics
