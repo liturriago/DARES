@@ -125,6 +125,13 @@ class HDF5Dataset(torch.utils.data.Dataset):
         """
         file = self._ensure_open()
         image = np.asarray(file[self.image_key][index], dtype=np.float32)
+        # Water / NoData pixels are stored as NaN in the imagery rasters
+        # (see Docs/data.md). Sanitize them before they reach the network:
+        # NaN -> 0 (physically reasonable for water, near-zero reflectance) and
+        # infinities clamped to a finite reflectance bound.
+        image = np.nan_to_num(
+            image, nan=0.0, posinf=10000.0, neginf=-10000.0, copy=True
+        )
         if self.labeled:
             if self.mask_key not in file:
                 raise KeyError(

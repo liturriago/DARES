@@ -35,6 +35,17 @@ def _check_container(path: Path, split: str, batch_size: int) -> dict:
             "compression": str(images.compression),
         }
 
+        # Count NaN / inf values in the imagery (water / NoData). Memory-safe
+        # chunked scan; the HDF5Dataset sanitizes these at load time.
+        n_nan = 0
+        n_inf = 0
+        for start in range(0, n, 256):
+            chunk = images[start : start + 256]
+            n_nan += int(np.isnan(chunk).sum())
+            n_inf += int(np.isinf(chunk).sum())
+        info["nan_values"] = n_nan
+        info["inf_values"] = n_inf
+
         mask = f.get("masks")
         if mask is not None:
             info["mask_dtype"] = str(mask.dtype)
@@ -112,6 +123,12 @@ def main(
             print(
                 f"{info['path']}: unlabeled (no masks), "
                 f"{info['effective_batches']} batches/epoch"
+            )
+        if info["nan_values"] > 0 or info["inf_values"] > 0:
+            print(
+                f"  WARNING: {info['nan_values']} NaN and {info['inf_values']} "
+                "inf pixel value(s) found (water/NoData); the loader sanitizes "
+                "these to 0 at load time."
             )
 
 

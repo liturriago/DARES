@@ -256,6 +256,28 @@ def test_dares_loader_unknown_domain_raises(tmp_path):
         loader.get_split_loaders(domain="nope")
 
 
+def test_h5_dataset_sanitizes_nan_and_inf(tmp_path):
+    """NaN / inf water pixels are replaced by 0 before reaching the network."""
+    file_path = tmp_path / "source_train.h5"
+    with h5py.File(file_path, "w") as f:
+        images = np.random.rand(2, 4, 8, 8).astype(np.float32)
+        images[0, 0, 0, 0] = np.nan
+        images[0, 1, 1, 1] = np.inf
+        images[0, 2, 2, 2] = -np.inf
+        f.create_dataset("images", data=images, compression="lzf")
+        f.create_dataset(
+            "masks", data=np.zeros((2, 8, 8), dtype=np.uint8), compression="lzf"
+        )
+
+    dataset = HDF5Dataset(file_path, labeled=True)
+    image, _ = dataset[0]
+    assert not np.isnan(image).any()
+    assert not np.isinf(image).any()
+    assert image[0, 0, 0] == 0.0
+    assert image[1, 1, 1] == 10000.0
+    assert image[2, 2, 2] == -10000.0
+
+
 def test_data_config_resolved_dir(tmp_path):
     """resolved_dir joins relative dirs to data_root and leaves absolute paths."""
     root = tmp_path / "input"
