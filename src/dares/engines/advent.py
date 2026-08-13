@@ -115,8 +115,9 @@ class ADVENTTrainer(BaseTrainer):
             d_s = self.discriminator(e_s.detach())
             d_t = self.discriminator(e_t.detach())
             loss_dis, _ = adversarial_loss(d_s, d_t)
-            self.scaler.scale(loss_dis).backward()
-            self.scaler.step(self.optimizer_d)
+            self._backward_step(
+                loss_dis, self.optimizer_d, self.discriminator.parameters()
+            )
 
             _, loss_adv = adversarial_loss(d_s.detach(), self.discriminator(e_t))
             loss_ce = self.criterion(logits_s, masks_s)
@@ -126,8 +127,7 @@ class ADVENTTrainer(BaseTrainer):
                 + self.config.lambda_adv * loss_adv
                 + self.config.lambda_entropy * loss_ent
             )
-            self.scaler.scale(total).backward()
-            self.scaler.step(self.optimizer)
+            self._backward_step(total, self.optimizer, self.model.parameters())
             self.scaler.update()
 
             running_ce += float(loss_ce.item())

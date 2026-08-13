@@ -164,6 +164,10 @@ class TrainConfig(BaseModel):
     lr_d: float | None = Field(default=None, gt=0)
     lr_g: float | None = Field(default=None, gt=0)
 
+    # Gradient clipping (global max norm) applied to each optimizer step.
+    # Mainly stabilizes adversarial methods (ADVENT / CyCADA); None disables.
+    grad_clip: float | None = Field(default=None, ge=0.0)
+
 
 class ExperimentMetadata(BaseModel):
     """Metadata for experiment tracking and outputs.

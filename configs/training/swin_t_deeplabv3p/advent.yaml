@@ -26,6 +26,8 @@ training:
   warmup_epochs: 5
   lambda_adv: 0.1
   lambda_entropy: 0.1
+  grad_clip: 5.0
+  lr_d: 0.00001
 experiment:
   name: "swin_t_deeplabv3p_advent"
   version: 1

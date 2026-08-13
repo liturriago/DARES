@@ -154,6 +154,29 @@ def test_train_epoch_finite_metrics(make_model, loaders):
     assert metrics["epoch_time"] >= 0.0
 
 
+def test_advent_grad_clip_stable(make_model, loaders):
+    """With grad_clip enabled the adversarial training stays finite."""
+    source_loaders, target_loaders = loaders
+    config = TrainConfig(
+        method="advent",
+        epochs=1,
+        lr=1e-4,
+        lambda_adv=0.1,
+        lambda_entropy=0.1,
+        grad_clip=5.0,
+        lr_d=1e-5,
+        device="cpu",
+        use_amp=False,
+        seed=42,
+    )
+    engine = ADVENTTrainer(
+        make_model(), source_loaders, target_loaders, config, torch.device("cpu")
+    )
+    metrics = engine.train_epoch()
+    for key, value in metrics.items():
+        assert np.isfinite(value), f"{key} is not finite"
+
+
 def test_fit_returns_model_with_history(make_model, loaders):
     """fit returns an nn.Module, tracks best mIoU and the loss history."""
     engine = _make_engine(make_model(), loaders)
