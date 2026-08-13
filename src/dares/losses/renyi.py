@@ -138,13 +138,17 @@ class RenyiLoss(nn.Module):
         probs: torch.Tensor,
         pseudo: torch.Tensor,
         conf: torch.Tensor,
-    ) -> dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]]:
+    ) -> dict[int, tuple[torch.Tensor, torch.Tensor]]:
         """Spatially-Stratified Confidence-Guided sampling operator ``Phi_c``.
 
         Grid-stratifies each ``(H, W)`` prediction map and, for every class and
         cell, keeps the single most-confident pixel whose pseudo-label matches
         the class and whose confidence exceeds ``tau``. This guarantees spatial
-        diversity while bounding the candidate count per class.
+        diversity while bounding the candidate count per class at ``n_max``.
+
+        The selection is fully vectorized (``view`` / ``gather`` over the grid
+        cells) so no per-cell Python loop or GPU sync is required. ``grid_size``
+        is reduced automatically when it does not divide the spatial size.
 
         Args:
             features_t (torch.Tensor): Target features of shape ``(B, D, H, W)``.
@@ -153,47 +157,67 @@ class RenyiLoss(nn.Module):
             conf (torch.Tensor): Target per-pixel confidence ``(B, H, W)``.
 
         Returns:
-            dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]]:
-                Per-class lists of ``(feature, confidence, probability)``
-                candidate triples.
+            dict[int, tuple[torch.Tensor, torch.Tensor]]: Per-class pairs of
+                ``(features, probabilities)`` of shapes ``(M, D)`` and
+                ``(M, C)`` (``M <= n_max``), already confidence-capped.
         """
         B, D, H, W = features_t.shape
-        feats_t_flat = features_t.permute(0, 2, 3, 1).reshape(-1, D)
-        probs_t_flat = probs.permute(0, 2, 3, 1).reshape(-1, self.num_classes)
+        num_cells = min(self.grid_size, H, W)
+        while num_cells > 1 and (H % num_cells != 0 or W % num_cells != 0):
+            num_cells -= 1
+        if num_cells < 2:
+            return {}
 
-        rows = torch.linspace(0, H, self.grid_size + 1, device=features_t.device)
-        cols = torch.linspace(0, W, self.grid_size + 1, device=features_t.device)
+        cell_h, cell_w = H // num_cells, W // num_cells
+        gg = cell_h * cell_w
 
-        candidates: dict[int, list[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = {
-            c: [] for c in range(self.num_classes)
-        }
+        pseudo_c = pseudo.view(B, num_cells, cell_h, num_cells, cell_w)
+        conf_c = conf.view(B, num_cells, cell_h, num_cells, cell_w)
+        pseudo_p = pseudo_c.permute(0, 1, 3, 2, 4)  # (B, nc, nc, ch, cw)
+        conf_p = conf_c.permute(0, 1, 3, 2, 4)
 
-        for b in range(B):
-            for i in range(self.grid_size):
-                r0 = int(round(rows[i].item()))
-                r1 = int(round(rows[i + 1].item()))
-                for j in range(self.grid_size):
-                    c0 = int(round(cols[j].item()))
-                    c1 = int(round(cols[j + 1].item()))
-                    cell_pseudo = pseudo[b, r0:r1, c0:c1]
-                    cell_conf = conf[b, r0:r1, c0:c1]
-                    for c in range(self.num_classes):
-                        mask = (cell_pseudo == c) & (cell_conf > self.tau)
-                        if not bool(mask.any()):
-                            continue
-                        idxs = torch.nonzero(mask, as_tuple=False)
-                        confs = cell_conf[idxs[:, 0], idxs[:, 1]]
-                        best = int(torch.argmax(confs).item())
-                        rr = int(idxs[best, 0].item()) + r0
-                        cc = int(idxs[best, 1].item()) + c0
-                        p_global = b * H * W + rr * W + cc
-                        candidates[c].append(
-                            (
-                                feats_t_flat[p_global],
-                                confs[best],
-                                probs_t_flat[p_global],
-                            )
-                        )
+        feats_c = features_t.view(B, D, num_cells, cell_h, num_cells, cell_w)
+        feats_p = feats_c.permute(0, 1, 2, 4, 3, 5)  # (B, D, nc, nc, ch, cw)
+        feats_flat = feats_p.reshape(B, D, num_cells, num_cells, gg)
+
+        probs_c = probs.view(
+            B, self.num_classes, num_cells, cell_h, num_cells, cell_w
+        )
+        probs_p = probs_c.permute(0, 1, 2, 4, 3, 5)
+        probs_flat = probs_p.reshape(
+            B, self.num_classes, num_cells, num_cells, gg
+        )
+
+        candidates: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+        for c in range(self.num_classes):
+            mask = (pseudo_p == c) & (conf_p > self.tau)
+            valid = torch.where(mask, conf_p, torch.tensor(-1.0, device=conf.device))
+            valid_flat = valid.reshape(B, num_cells, num_cells, gg)
+            best = valid_flat.argmax(dim=-1)  # (B, nc, nc) within-cell index
+            best_conf = valid_flat.gather(-1, best.unsqueeze(-1)).squeeze(-1)
+            cell_ok = best_conf > 0.0  # cells with a valid pixel for class c
+
+            if not bool(cell_ok.any()):
+                continue
+
+            idx = best.unsqueeze(1).unsqueeze(-1)  # (B, 1, nc, nc, 1)
+            best_feats = feats_flat.gather(
+                -1, idx.expand(B, D, num_cells, num_cells, 1)
+            ).squeeze(-1)  # (B, D, nc, nc)
+            best_probs = probs_flat.gather(
+                -1, idx.expand(B, self.num_classes, num_cells, num_cells, 1)
+            ).squeeze(-1)  # (B, C, nc, nc)
+
+            feats_f = best_feats.permute(0, 2, 3, 1)[cell_ok]  # (M, D)
+            probs_f = best_probs.permute(0, 2, 3, 1)[cell_ok]  # (M, C)
+            confs_f = best_conf[cell_ok]  # (M,)
+
+            if feats_f.shape[0] > self.n_max:
+                keep = torch.argsort(confs_f, descending=True)[: self.n_max]
+                feats_f = feats_f[keep]
+                probs_f = probs_f[keep]
+
+            candidates[c] = (feats_f, probs_f)
         return candidates
 
     def forward(
@@ -255,16 +279,9 @@ class RenyiLoss(nn.Module):
 
         for c in range(self.num_classes):
             F_s_c = source_by_class.get(c)
-            if F_s_c is None or not candidates[c]:
+            if F_s_c is None or c not in candidates:
                 continue
-            F_t_c = torch.stack([t[0] for t in candidates[c]])
-            confs_c = torch.stack([t[1] for t in candidates[c]])
-            probs_c = torch.stack([t[2] for t in candidates[c]])
-
-            if F_t_c.shape[0] > self.n_max:
-                keep = torch.argsort(confs_c, descending=True)[: self.n_max]
-                F_t_c = F_t_c[keep]
-                probs_c = probs_c[keep]
+            F_t_c, probs_c = candidates[c]
 
             n_s, n_t = F_s_c.shape[0], F_t_c.shape[0]
             if n_s < 2 or n_t < 2:
