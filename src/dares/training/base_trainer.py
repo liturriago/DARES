@@ -169,6 +169,11 @@ class BaseTrainer(ABC):
         validation splits, step the scheduler, and keep the checkpoint with the
         best target-validation mIoU. Restores the best weights before returning.
 
+        If ``config.warmup_epochs > 0`` the backbone is frozen (head-only
+        warm-start) for the first ``warmup_epochs`` epochs and unfrozen
+        afterwards; the DARES engine aligns its alignment-weight warm-up with
+        the same period.
+
         Args:
             scheduler (LRScheduler | None): Optional learning-rate scheduler
                 for the main optimizer.
@@ -177,7 +182,21 @@ class BaseTrainer(ABC):
             nn.Module: The model with the best target-validation weights.
         """
         total_start = time.time()
+        warmup_epochs = int(self.config.warmup_epochs or 0)
+        if warmup_epochs > 0:
+            self.model.freeze_backbone()
+            print(
+                f"Warm-up enabled: backbone frozen for the first "
+                f"{warmup_epochs} epoch(s) (head-only training)."
+            )
+
         for epoch in range(self.config.epochs):
+            if 0 < warmup_epochs == epoch:
+                self.model.unfreeze_backbone()
+                print(
+                    f"Warm-up complete at epoch {epoch + 1}: backbone unfrozen."
+                )
+
             print(f"\nEpoch {epoch + 1}/{self.config.epochs}")
             print("-" * 40)
 

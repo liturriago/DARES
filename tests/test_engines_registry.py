@@ -96,3 +96,48 @@ def test_engine_common_contract(method, loaders):
     result = engine.fit()
     assert isinstance(result, torch.nn.Module)
     assert engine.best_miou > 0.0
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_warmup_unfreezes_backbone(method, loaders):
+    """With epochs > warmup_epochs the backbone is unfrozen after fit."""
+    source_loaders, target_loaders = loaders
+    config = TrainConfig(
+        method=method,
+        epochs=2,
+        warmup_epochs=1,
+        lr=1e-4,
+        device="cpu",
+        use_amp=False,
+        seed=42,
+    )
+    engine = build_engine(
+        method, _make_model(), source_loaders, target_loaders, config, torch.device("cpu")
+    )
+    engine.fit()
+    assert all(
+        param.requires_grad for param in engine.model.backbone.parameters()
+    ), f"{method}: backbone should be unfrozen after warm-up"
+
+
+def test_warmup_keeps_backbone_frozen(loaders):
+    """When the budget is shorter than the warm-up, the backbone stays frozen."""
+    from dares.engines.source_only import SourceOnlyTrainer
+
+    source_loaders, target_loaders = loaders
+    config = TrainConfig(
+        method="source_only",
+        epochs=1,
+        warmup_epochs=5,
+        lr=1e-4,
+        device="cpu",
+        use_amp=False,
+        seed=42,
+    )
+    engine = SourceOnlyTrainer(
+        _make_model(), source_loaders, target_loaders, config, torch.device("cpu")
+    )
+    engine.fit()
+    assert not all(
+        param.requires_grad for param in engine.model.backbone.parameters()
+    ), "backbone should remain frozen during the entire warm-up"

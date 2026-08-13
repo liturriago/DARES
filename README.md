@@ -90,7 +90,7 @@ model:
 
 training:
   method: "dares"
-  epochs: 100
+  epochs: 45
   lr: 0.0001
   device: "cuda"
   lambda_renyi: 0.1

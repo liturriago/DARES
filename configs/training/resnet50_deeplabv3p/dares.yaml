@@ -16,7 +16,7 @@ model:
   dropout_rate: 0.1
 training:
   method: "dares"
-  epochs: 100
+  epochs: 10
   lr: 0.0001
   weight_decay: 0.00001
   gamma: 0.94
@@ -28,7 +28,7 @@ training:
   n_max: 1024
   sigma: "auto"
   alpha: 2
-  warmup_epochs: null
+  warmup_epochs: 5
 experiment:
   name: "resnet50_deeplabv3p_dares"
   version: 1

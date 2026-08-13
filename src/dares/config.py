@@ -119,7 +119,7 @@ class TrainConfig(BaseModel):
         alpha (int): Order of the Renyi entropy (alpha = 2).
         warmup_epochs (int | None): Epochs with alignment disabled (lambda_renyi = 0).
     """
-    epochs: int = Field(default=100, gt=0)
+    epochs: int = Field(default=45, gt=0)
     lr: float = Field(default=1e-4, gt=0)
     weight_decay: float = Field(default=1e-5, ge=0.0)
     gamma: float = Field(default=0.94, gt=0.0, le=1.0)

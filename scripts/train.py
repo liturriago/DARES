@@ -15,12 +15,12 @@ import json
 from pathlib import Path
 
 import torch
-from torch.optim import lr_scheduler
 
 from dares.config import ExperimentConfig, TrainConfig
 from dares.data.loader import DARESDataLoader
 from dares.engines import build_engine
 from dares.models import build_model
+from dares.training.schedulers import build_scheduler
 from dares.utils.evaluation import evaluate_segmentation, metrics_to_jsonable
 from dares.utils.reproducibility import set_seed
 
@@ -68,7 +68,7 @@ def main(
         cfg.training,
         device,
     )
-    scheduler = lr_scheduler.ExponentialLR(engine.optimizer, gamma=cfg.training.gamma)
+    scheduler = build_scheduler(engine.optimizer, cfg.training)
 
     print(f"\n Starting {cfg.training.method.upper()} experiment on {device}...")
     trained_model = engine.fit(scheduler=scheduler)
