@@ -16,7 +16,7 @@ model:
   dropout_rate: 0.1
 training:
   method: "advent"
-  epochs: 10
+  epochs: 25
   lr: 0.0001
   weight_decay: 0.00001
   gamma: 0.94

@@ -160,7 +160,7 @@ def test_config_matrix_complete_and_valid():
             assert cfg.model.backbone == backbone
             assert cfg.model.head == head
             assert cfg.training.method == method
-            assert cfg.training.epochs == 10
+            assert cfg.training.epochs == 25
             expected_warmup = 2 if method == "dares" else 5
             assert cfg.training.warmup_epochs == expected_warmup
             assert cfg.experiment.output_dir == Path(
