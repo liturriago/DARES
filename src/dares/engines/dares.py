@@ -10,6 +10,7 @@ The alignment term is *subtracted* because the mutual-information estimator is
 maximized during training (Eq. 5 of the paper).
 """
 
+import math
 import time
 from typing import Any
 
@@ -68,9 +69,44 @@ class DARESTrainer(BaseTrainer):
             n_max=config.n_max,
             sigma=config.sigma,
             alpha=config.alpha,
+            grid_size=config.grid_size,
         )
         self.optimizer = self._make_optimizer(self.model.parameters())
         self._epoch_idx = 0
+
+    def _alignment_weight(self, epoch_idx: int) -> float:
+        """Computes the active alignment weight for a given epoch.
+
+        Follows the CREDA dynamic schedule (Eq. 29 of the CREDA paper):
+
+        ``lambda(p) = lambda_max * tanh(delta * p / 2)``
+
+        with ``p = (epoch_idx + 1) / epochs`` the relative training progress.
+        The logistic ramp lets the alignment term grow smoothly from ``0``
+        instead of jumping in at full strength, which protects the early
+        epochs (where target pseudo-labels are noisy) while still making the
+        full ``lambda_renyi`` available in the second half of training. During
+        the warmup phase (``epoch_idx < warmup_epochs``) the weight is ``0.0``
+        and when ``schedule_delta <= 0`` the ramp is disabled (constant
+        ``lambda_renyi``).
+
+        Args:
+            epoch_idx (int): Zero-based index of the current epoch.
+
+        Returns:
+            float: The active alignment weight for the epoch.
+        """
+        if (
+            self.config.warmup_epochs is not None
+            and epoch_idx < self.config.warmup_epochs
+        ):
+            return 0.0
+        delta = float(self.config.schedule_delta)
+        if delta <= 0.0:
+            return float(self.config.lambda_renyi)
+        progress = (epoch_idx + 1) / max(int(self.config.epochs), 1)
+        factor = math.tanh(0.5 * delta * progress)
+        return float(self.config.lambda_renyi) * factor
 
     def train_epoch(self) -> dict[str, float]:
         """Runs one epoch of DARES training.
@@ -78,8 +114,9 @@ class DARESTrainer(BaseTrainer):
         Pairs source and target batches with ``_dual_iterators`` and for each
         pair computes the source cross-entropy plus the class-conditional
         Renyi alignment. The mutual-information term is maximized by
-        minimizing ``L_CE - lambda * I2tilde``; during the warmup phase
-        (``epoch_idx < warmup_epochs``) the alignment weight is ``0.0``.
+        minimizing ``L_CE - lambda * I2tilde``; the alignment weight follows
+        the CREDA dynamic ramp (see :meth:`_alignment_weight`) and is ``0.0``
+        during the warmup phase (``epoch_idx < warmup_epochs``).
 
         Returns
         -------
@@ -93,11 +130,7 @@ class DARESTrainer(BaseTrainer):
             self.source_loaders["train"], self.target_loaders["train"]
         )
 
-        warmup = (
-            self.config.warmup_epochs is not None
-            and self._epoch_idx < self.config.warmup_epochs
-        )
-        lambda_active = 0.0 if warmup else float(self.config.lambda_renyi)
+        lambda_active = self._alignment_weight(self._epoch_idx)
 
         total_loss = 0.0
         ce_loss = 0.0

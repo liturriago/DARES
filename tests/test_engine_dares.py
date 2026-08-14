@@ -61,20 +61,21 @@ def _build_fixtures(tmp_path: Path, **train_overrides):
             pretrained=False,
         )
     )
-    config = TrainConfig(
-        method="dares",
-        epochs=1,
-        lr=1e-4,
-        lambda_renyi=0.1,
-        tau=0.85,
-        n_max=1024,
-        sigma="auto",
-        alpha=2,
-        device="cpu",
-        use_amp=False,
-        seed=42,
-        **train_overrides,
-    )
+    config_kwargs = {
+        "method": "dares",
+        "epochs": 1,
+        "lr": 1e-4,
+        "lambda_renyi": 0.1,
+        "tau": 0.85,
+        "n_max": 1024,
+        "sigma": "auto",
+        "alpha": 2,
+        "device": "cpu",
+        "use_amp": False,
+        "seed": 42,
+    }
+    config_kwargs.update(train_overrides)
+    config = TrainConfig(**config_kwargs)
     device = torch.device("cpu")
     return (
         model,
@@ -142,3 +143,62 @@ def test_warmup_disables_alignment(tmp_path):
     metrics = engine.train_epoch()
 
     assert metrics["lambda_active"] == 0.0
+
+
+def test_grid_size_is_forwarded_to_renyi_loss(tmp_path):
+    """The config grid_size reaches the RenyiLoss sampling operator."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, grid_size=16
+    )
+    engine = DARESTrainer(
+        model, source_loaders, target_loaders, config, device
+    )
+
+    assert engine.renyi_loss.grid_size == 16
+
+
+def test_lambda_ramp_grows_with_training_progress(tmp_path):
+    """The CREDA ramp monotonically grows lambda toward lambda_renyi."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, epochs=4, schedule_delta=8, warmup_epochs=None
+    )
+    engine = DARESTrainer(
+        model, source_loaders, target_loaders, config, device
+    )
+
+    lambdas = [engine.train_epoch()["lambda_active"] for _ in range(4)]
+
+    assert lambdas[0] < config.lambda_renyi
+    assert lambdas[-1] == pytest.approx(config.lambda_renyi, abs=1e-3)
+    assert all(a <= b for a, b in zip(lambdas, lambdas[1:]))
+
+
+def test_schedule_delta_zero_keeps_constant_lambda(tmp_path):
+    """schedule_delta=0 disables the ramp and fixes lambda at lambda_renyi."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, epochs=3, schedule_delta=0
+    )
+    engine = DARESTrainer(
+        model, source_loaders, target_loaders, config, device
+    )
+
+    lambdas = [engine.train_epoch()["lambda_active"] for _ in range(3)]
+
+    assert lambdas == [config.lambda_renyi] * 3
+
+
+def test_lambda_ramp_respects_warmup(tmp_path):
+    """Alignment stays off during warmup and ramps in afterwards."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, epochs=4, warmup_epochs=2
+    )
+    engine = DARESTrainer(
+        model, source_loaders, target_loaders, config, device
+    )
+
+    lambdas = [engine.train_epoch()["lambda_active"] for _ in range(4)]
+
+    assert lambdas[0] == 0.0
+    assert lambdas[1] == 0.0
+    assert lambdas[2] > 0.0
+    assert lambdas[3] > 0.0

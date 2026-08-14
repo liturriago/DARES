@@ -12,6 +12,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 - **Five UDA methods** under one shared training interface: Source-Only baseline, ADVENT, CyCADA, CBST and **DARES** (the proposed α-Rényi alignment).
 - **Pluggable architecture matrix:** backbones (ResNet50, ConvNeXt-Tiny, Swin-T) × segmentation heads (ResUNet decoder, DeepLabV3+ ASPP).
 - **DARES core loss:** matrix-based order-2 Rényi mutual information `Ĩ₂` over class-conditional Gaussian Gram matrices, with median-heuristic kernel bandwidth and entropy-based pseudo-label confidence weighting.
+- **CREDA dynamic alignment schedule:** the Rényi weight follows `λ(p) = λ_max · tanh(δp/2)` (CREDA Eq. 29) with `p` the relative training progress, so the alignment ramps in smoothly instead of jumping in at full strength.
 - **HDF5 data pipeline** (`float32` 4-band patches, LZF compression) with lazy, worker-safe dataset loading.
 - **Segmentation metrics:** per-class and mean IoU, DICE (F1), Overall Accuracy, MCC, plus per-class precision/recall.
 - **Config-driven experiments:** every method/architecture combination is a YAML file; single CLI entry points for train and evaluate.
@@ -25,7 +26,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 | `advent` | Adversarial | Entropy-map domain discriminator + target entropy minimization. |
 | `cycada` | Adversarial | Cycle-consistent pixel translation + feature adversarial alignment. |
 | `cbst` | Self-training | Class-balanced pseudo-label selection with masked CE. |
-| `dares` | Info-theoretic | `L = L_CE(D_s) − λ Σ_c Ĩ₂(K_s^c; K̃_t^c)` — class-conditional Rényi alignment with the Φ_c sampling operator. |
+| `dares` | Info-theoretic | `L = L_CE(D_s) − λ(p) Σ_c Ĩ₂(K_s^c; K̃_t^c)` — class-conditional Rényi alignment with the Φ_c sampling operator and a CREDA dynamic weight ramp `λ(p) = λ_max·tanh(δp/2)`. |
 
 ## Installation
 
@@ -93,10 +94,12 @@ training:
   epochs: 45
   lr: 0.0001
   device: "cuda"
-  lambda_renyi: 0.1
-  tau: 0.85               # Φ_c confidence threshold
+  lambda_renyi: 0.2       # λ_max of the alignment weight ramp
+  tau: 0.8                # Φ_c confidence threshold
   n_max: 1024             # samples per class per mini-batch
   sigma: "auto"           # median-heuristic kernel bandwidth
+  grid_size: 16           # Φ_c spatial grid (per side)
+  schedule_delta: 8       # CREDA ramp steepness (λ(p) = λ_max·tanh(δp/2)); 0 = constant λ
 
 experiment:
   name: "resnet50_resunet_dares"

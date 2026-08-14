@@ -23,12 +23,14 @@ training:
   use_amp: true
   device: "cuda"
   seed: 42
-  lambda_renyi: 0.1
-  tau: 0.85
+  lambda_renyi: 0.2
+  tau: 0.8
   n_max: 1024
   sigma: "auto"
   alpha: 2
-  warmup_epochs: 5
+  grid_size: 16
+  schedule_delta: 8
+  warmup_epochs: 2
 experiment:
   name: "resnet50_deeplabv3p_dares"
   version: 1

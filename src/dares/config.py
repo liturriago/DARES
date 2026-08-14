@@ -107,16 +107,23 @@ class TrainConfig(BaseModel):
             (eta(p) = eta0 * (1 + alpha*p)^(-beta)).
         schedule_alpha (float): alpha hyperparameter of the LR schedule.
         schedule_beta (float): beta hyperparameter of the LR schedule.
-        schedule_delta (float): delta hyperparameter of the alignment weight ramp.
+        schedule_delta (float): delta hyperparameter of the CREDA alignment
+            weight ramp (Eq. 29 of the paper), ``lambda(p) = lambda_max *
+            tanh(delta * p / 2)`` with ``p = (epoch + 1) / epochs``; set to
+            ``0`` to disable the ramp and use a constant ``lambda_renyi``.
         use_amp (bool): Whether to use Automatic Mixed Precision.
         device (Literal): Computing device (cpu, cuda, mps).
         seed (int): Random seed for reproducibility.
-        lambda_renyi (float): Weight of the DARES alpha-Renyi alignment term.
+        lambda_renyi (float): Weight of the DARES alpha-Renyi alignment term
+            (used as the plateau value ``lambda_max`` of the ramp).
         tau (float): Pseudo-label confidence threshold for the sampling operator.
         n_max (int): Maximum number of samples per class per mini-batch (N_max).
         sigma (float | Literal["auto"]): Kernel bandwidth; "auto" uses the
             median heuristic.
         alpha (int): Order of the Renyi entropy (alpha = 2).
+        grid_size (int): Number of spatial cells per side used by the
+            stratified sampling operator ``Phi_c`` (reduced automatically to a
+            divisor of the input spatial size).
         warmup_epochs (int | None): Epochs with alignment disabled (lambda_renyi = 0).
     """
     epochs: int = Field(default=45, gt=0)
@@ -127,7 +134,7 @@ class TrainConfig(BaseModel):
     lr_schedule: bool = True
     schedule_alpha: float = Field(default=20.0, gt=0.0)
     schedule_beta: float = Field(default=0.75, gt=0.0)
-    schedule_delta: float = Field(default=20.0, gt=0.0)
+    schedule_delta: float = Field(default=20.0, ge=0.0)
 
     use_amp: bool = True
     device: Literal["cuda", "cpu", "mps"] = "cuda"
@@ -139,6 +146,7 @@ class TrainConfig(BaseModel):
     n_max: int = Field(default=1024, gt=0)
     sigma: float | Literal["auto"] = "auto"
     alpha: int = Field(default=2, ge=1)
+    grid_size: int = Field(default=8, gt=0)
     warmup_epochs: int | None = None
 
     # Method selection (drives build_engine)
