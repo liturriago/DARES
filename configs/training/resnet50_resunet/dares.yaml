@@ -24,9 +24,9 @@ training:
   use_amp: true
   device: "cuda"
   seed: 42
-  lambda_renyi: 0.35
-  tau: 0.75
-  n_max: 512
+  lambda_renyi: 0.20
+  tau: 0.70
+  n_max: 2048
   sigma: "auto"
   alpha: 2
   grid_size: 12
