@@ -24,12 +24,12 @@ training:
   use_amp: true
   device: "cuda"
   seed: 42
-  lambda_renyi: 0.03
-  tau: 0.85
+  lambda_renyi: 0.35
+  tau: 0.75
   n_max: 512
   sigma: "auto"
   alpha: 2
-  grid_size: 8
+  grid_size: 12
   schedule_delta: 12
   warmup_epochs: 5
 experiment:
