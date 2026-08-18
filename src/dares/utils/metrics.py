@@ -22,7 +22,10 @@ class MetricTracker:
 
     @staticmethod
     def compute_confusion_matrix(
-        preds: Tensor, labels: Tensor, num_classes: int
+        preds: Tensor,
+        labels: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
     ) -> Tensor:
         """Computes the multi-class confusion matrix.
 
@@ -32,6 +35,10 @@ class MetricTracker:
             labels (Tensor): Ground-truth class indices, same shape as
                 ``preds``.
             num_classes (int): Number of classes (``C``).
+            ignore_index (int | None): Optional label value excluded from the
+                matrix (e.g. ``255`` for masked water / NoData pixels). When
+                set, every pixel whose label matches is dropped entirely
+                (prediction and label).
 
         Returns:
             Tensor: Confusion matrix ``conf[c_actual, c_pred]`` of shape
@@ -50,6 +57,10 @@ class MetricTracker:
                 "preds and labels must have the same number of elements, "
                 f"got {preds_flat.numel()} vs {labels_flat.numel()}."
             )
+        if ignore_index is not None:
+            valid = labels_flat != ignore_index
+            preds_flat = preds_flat[valid]
+            labels_flat = labels_flat[valid]
         indices = labels_flat * num_classes + preds_flat
         return torch.bincount(
             indices, minlength=num_classes * num_classes
@@ -74,7 +85,10 @@ class MetricTracker:
 
     @staticmethod
     def compute_iou(
-        preds: Tensor, labels: Tensor, num_classes: int
+        preds: Tensor,
+        labels: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Computes per-class IoU and the macro mean IoU.
 
@@ -82,19 +96,26 @@ class MetricTracker:
             preds (Tensor): Predicted class indices.
             labels (Tensor): Ground-truth class indices.
             num_classes (int): Number of classes.
+            ignore_index (int | None): Optional label value excluded from the
+                confusion matrix (e.g. ``255``).
 
         Returns:
             tuple[Tensor, Tensor]: Per-class IoU ``(C,)`` and scalar mIoU
                 (mean over all ``C`` classes).
         """
-        conf = MetricTracker.compute_confusion_matrix(preds, labels, num_classes)
+        conf = MetricTracker.compute_confusion_matrix(
+            preds, labels, num_classes, ignore_index=ignore_index
+        )
         tp, fp, fn, _ = MetricTracker._per_class_counts(conf)
         iou = MetricTracker._safe_divide(tp, tp + fp + fn)
         return iou, iou.mean()
 
     @staticmethod
     def compute_dice(
-        preds: Tensor, labels: Tensor, num_classes: int
+        preds: Tensor,
+        labels: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Computes per-class DICE and the macro mean.
 
@@ -102,32 +123,54 @@ class MetricTracker:
             preds (Tensor): Predicted class indices.
             labels (Tensor): Ground-truth class indices.
             num_classes (int): Number of classes.
+            ignore_index (int | None): Optional label value excluded from the
+                confusion matrix (e.g. ``255``).
 
         Returns:
             tuple[Tensor, Tensor]: Per-class DICE ``(C,)`` and scalar mean.
         """
-        conf = MetricTracker.compute_confusion_matrix(preds, labels, num_classes)
+        conf = MetricTracker.compute_confusion_matrix(
+            preds, labels, num_classes, ignore_index=ignore_index
+        )
         tp, fp, fn, _ = MetricTracker._per_class_counts(conf)
         dice = MetricTracker._safe_divide(2 * tp, 2 * tp + fp + fn)
         return dice, dice.mean()
 
     @staticmethod
-    def compute_accuracy(preds: Tensor, labels: Tensor) -> float:
+    def compute_accuracy(
+        preds: Tensor, labels: Tensor, ignore_index: int | None = None
+    ) -> float:
         """Computes the overall pixel accuracy ``trace(conf) / total``.
 
         Args:
             preds (Tensor): Predicted class indices.
             labels (Tensor): Ground-truth class indices.
+            ignore_index (int | None): Optional label value excluded from the
+                computation (e.g. ``255``).
 
         Returns:
-            float: Fraction of correctly predicted pixels in ``[0, 1]``.
+            float: Fraction of correctly predicted valid pixels in ``[0, 1]``.
         """
+        if ignore_index is not None:
+            preds_flat = preds.reshape(-1).long()
+            labels_flat = labels.reshape(-1).long()
+            valid = labels_flat != ignore_index
+            preds_flat = preds_flat[valid]
+            labels_flat = labels_flat[valid]
+            preds, labels = preds_flat, labels_flat
+        if labels.numel() == 0:
+            return 0.0
         num_classes = int(max(int(preds.max()), int(labels.max()))) + 1
         conf = MetricTracker.compute_confusion_matrix(preds, labels, num_classes)
         return float(torch.trace(conf)) / float(conf.sum())
 
     @staticmethod
-    def compute_mcc(preds: Tensor, labels: Tensor, num_classes: int) -> float:
+    def compute_mcc(
+        preds: Tensor,
+        labels: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
+    ) -> float:
         """Computes the generalized (multi-class) Matthews correlation coefficient.
 
         Uses ``mcc = (s * c - row @ col) /
@@ -141,12 +184,14 @@ class MetricTracker:
             preds (Tensor): Predicted class indices.
             labels (Tensor): Ground-truth class indices.
             num_classes (int): Number of classes.
+            ignore_index (int | None): Optional label value excluded from the
+                confusion matrix (e.g. ``255``).
 
         Returns:
             float: MCC in ``[-1, 1]``, ``0.0`` for degenerate cases.
         """
         conf = MetricTracker.compute_confusion_matrix(
-            preds, labels, num_classes
+            preds, labels, num_classes, ignore_index=ignore_index
         ).to(torch.float64)
         row = conf.sum(dim=1)
         col = conf.sum(dim=0)
@@ -161,7 +206,10 @@ class MetricTracker:
 
     @staticmethod
     def compute_precision_recall(
-        preds: Tensor, labels: Tensor, num_classes: int
+        preds: Tensor,
+        labels: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Computes per-class precision and recall.
 
@@ -169,12 +217,16 @@ class MetricTracker:
             preds (Tensor): Predicted class indices.
             labels (Tensor): Ground-truth class indices.
             num_classes (int): Number of classes.
+            ignore_index (int | None): Optional label value excluded from the
+                confusion matrix (e.g. ``255``).
 
         Returns:
             tuple[Tensor, Tensor]: Per-class precision ``(C,)`` and per-class
                 recall ``(C,)``.
         """
-        conf = MetricTracker.compute_confusion_matrix(preds, labels, num_classes)
+        conf = MetricTracker.compute_confusion_matrix(
+            preds, labels, num_classes, ignore_index=ignore_index
+        )
         tp, fp, fn, _ = MetricTracker._per_class_counts(conf)
         precision = MetricTracker._safe_divide(tp, tp + fp)
         recall = MetricTracker._safe_divide(tp, tp + fn)
@@ -182,7 +234,10 @@ class MetricTracker:
 
     @staticmethod
     def compute_full_metrics(
-        preds: Tensor, labels: Tensor, num_classes: int
+        preds: Tensor,
+        labels: Tensor,
+        num_classes: int,
+        ignore_index: int | None = None,
     ) -> dict[str, Any]:
         """Computes the full set of segmentation metrics in one pass.
 
@@ -190,6 +245,8 @@ class MetricTracker:
             preds (Tensor): Predicted class indices.
             labels (Tensor): Ground-truth class indices.
             num_classes (int): Number of classes.
+            ignore_index (int | None): Optional label value excluded from all
+                metrics (e.g. ``255`` for masked water / NoData pixels).
 
         Returns:
             dict[str, Any]: Dictionary with keys ``confusion_matrix``,
@@ -197,7 +254,9 @@ class MetricTracker:
                 ``recall``, ``accuracy`` and ``support``), ``mIoU``,
                 ``mean_dice``, ``overall_acc`` and ``mcc``.
         """
-        conf = MetricTracker.compute_confusion_matrix(preds, labels, num_classes)
+        conf = MetricTracker.compute_confusion_matrix(
+            preds, labels, num_classes, ignore_index=ignore_index
+        )
         tp, fp, fn, tn = MetricTracker._per_class_counts(conf)
         total = float(conf.sum())
 
@@ -223,7 +282,9 @@ class MetricTracker:
             "mIoU": float(iou.mean()),
             "mean_dice": float(dice.mean()),
             "overall_acc": float(torch.trace(conf)) / total,
-            "mcc": MetricTracker.compute_mcc(preds, labels, num_classes),
+            "mcc": MetricTracker.compute_mcc(
+                preds, labels, num_classes, ignore_index=ignore_index
+            ),
         }
 
     @staticmethod

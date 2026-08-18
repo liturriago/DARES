@@ -19,6 +19,7 @@ from dares.config import ExperimentConfig
 from dares.data.loader import SPLIT_FILENAMES
 
 FOREST_RATIO_RANGE = (0.15, 0.85)
+IGNORE_VALUE = 255  # water / wetland pixels per Docs/data.md
 
 
 def _check_container(path: Path, split: str, batch_size: int) -> dict:
@@ -52,13 +53,28 @@ def _check_container(path: Path, split: str, batch_size: int) -> dict:
             mask_vals = mask[...]
             unique = np.unique(mask_vals)
             info["mask_values"] = [int(v) for v in unique]
-            ratios = mask_vals.mean(axis=(1, 2))
-            info["forest_ratio"] = float(ratios.mean())
-            info["ratio_min"] = float(ratios.min())
-            info["ratio_max"] = float(ratios.max())
-            info["out_of_range"] = int(
-                ((ratios < FOREST_RATIO_RANGE[0]) | (ratios > FOREST_RATIO_RANGE[1])).sum()
+            # Forest ratio is computed over *valid* pixels only: water /
+            # wetland labels are stored as IGNORE_VALUE and must not be
+            # counted as classes (Docs/data.md section 3.2).
+            valid = mask_vals != IGNORE_VALUE
+            valid_counts = valid.sum(axis=(1, 2))
+            forest_counts = (mask_vals == 1).sum(axis=(1, 2))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratios = np.where(
+                    valid_counts > 0,
+                    forest_counts / np.maximum(valid_counts, 1),
+                    np.nan,
+                )
+            finite = np.isfinite(ratios)
+            info["forest_ratio"] = (
+                float(ratios[finite].mean()) if finite.any() else None
             )
+            info["ratio_min"] = float(np.nanmin(ratios)) if finite.any() else None
+            info["ratio_max"] = float(np.nanmax(ratios)) if finite.any() else None
+            info["out_of_range"] = int(
+                (finite & ((ratios < FOREST_RATIO_RANGE[0]) | (ratios > FOREST_RATIO_RANGE[1]))).sum()
+            )
+            info["ignored_pixels"] = int((mask_vals == IGNORE_VALUE).sum())
         else:
             info["mask_dtype"] = None
             info["forest_ratio"] = None

@@ -162,3 +162,63 @@ def test_device_consistency():
     conf = MetricTracker.compute_confusion_matrix(preds, labels, 2)
     assert conf.device == preds.device
     assert conf.device.type == "cpu"
+
+
+def test_ignore_index_excludes_masked_pixels():
+    """Labels equal to ignore_index (255 water) are dropped from the matrix."""
+    labels = torch.tensor([0] * 60 + [1] * 40 + [255] * 25, dtype=torch.long)
+    preds = torch.tensor(
+        [0] * 50 + [1] * 10 + [0] * 5 + [1] * 35 + [0] * 25, dtype=torch.long
+    )
+
+    conf = MetricTracker.compute_confusion_matrix(
+        preds, labels, 2, ignore_index=255
+    )
+
+    assert conf.tolist() == [[50, 10], [5, 35]]
+    assert int(conf.sum()) == 100
+
+
+def test_ignore_index_metrics_match_valid_only():
+    """With masked pixels the metrics equal the hand-verified valid-only ones."""
+    labels = torch.tensor([0] * 60 + [1] * 40 + [255] * 25, dtype=torch.long)
+    preds = torch.tensor(
+        [0] * 50 + [1] * 10 + [0] * 5 + [1] * 35 + [0] * 25, dtype=torch.long
+    )
+
+    iou, miou = MetricTracker.compute_iou(preds, labels, 2, ignore_index=255)
+    dice, _ = MetricTracker.compute_dice(preds, labels, 2, ignore_index=255)
+    prec, rec = MetricTracker.compute_precision_recall(
+        preds, labels, 2, ignore_index=255
+    )
+    acc = MetricTracker.compute_accuracy(preds, labels, ignore_index=255)
+    mcc = MetricTracker.compute_mcc(preds, labels, 2, ignore_index=255)
+    full = MetricTracker.compute_full_metrics(
+        preds, labels, 2, ignore_index=255
+    )
+
+    assert iou.tolist() == pytest.approx([50 / 65, 35 / 50], abs=1e-4)
+    assert miou.item() == pytest.approx(0.73462, abs=1e-4)
+    assert dice.tolist() == pytest.approx([100 / 115, 70 / 85], abs=1e-4)
+    assert prec.tolist() == pytest.approx([50 / 55, 35 / 45], abs=1e-4)
+    assert rec.tolist() == pytest.approx([50 / 60, 35 / 40], abs=1e-4)
+    assert acc == pytest.approx(0.85)
+    assert mcc == pytest.approx(0.69752, abs=1e-4)
+    assert full["mIoU"] == pytest.approx(0.73462, abs=1e-4)
+    assert full["per_class"]["support"] == [60, 40]
+
+
+def test_ignore_index_all_masked_returns_zero_accuracy():
+    """No valid pixels left yields a safe 0.0 accuracy (no NaN)."""
+    labels = torch.full((10,), 255, dtype=torch.long)
+    preds = torch.full((10,), 0, dtype=torch.long)
+
+    iou, miou = MetricTracker.compute_iou(
+        preds, labels, 2, ignore_index=255
+    )
+    acc = MetricTracker.compute_accuracy(preds, labels, ignore_index=255)
+
+    assert math.isfinite(acc)
+    assert acc == 0.0
+    assert bool((iou == 0.0).all())
+    assert math.isfinite(miou.item())

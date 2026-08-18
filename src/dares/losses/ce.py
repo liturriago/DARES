@@ -13,10 +13,12 @@ class SegCrossEntropyLoss(nn.Module):
     shared by labeled source and unlabeled target pipelines.
 
     Args:
-        ignore_index (int): Class index ignored in the loss (default -100).
+        ignore_index (int): Class index ignored in the loss. The DARES dataset
+            encodes water / wetland pixels as ``255`` (see ``Docs/data.md``),
+            so the default matches the container convention.
     """
 
-    def __init__(self, ignore_index: int = -100) -> None:
+    def __init__(self, ignore_index: int = 255) -> None:
         super().__init__()
         self.ignore_index = ignore_index
 

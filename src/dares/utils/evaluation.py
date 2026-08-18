@@ -17,6 +17,7 @@ def evaluate_segmentation(
     class_names: list[str],
     use_amp: bool = False,
     prefix: str = "Evaluation",
+    ignore_index: int = 255,
 ) -> dict[str, Any]:
     """Runs pixel-level inference and computes the full metric set.
 
@@ -28,6 +29,8 @@ def evaluate_segmentation(
         class_names (list[str]): Human-readable class names.
         use_amp (bool): Whether to run inference under automatic mixed precision.
         prefix (str): Label for the printed report.
+        ignore_index (int): Label value excluded from the metrics (``255`` for
+            water / NoData pixels per the DARES dataset contract).
 
     Returns:
         dict[str, Any]: The full metrics dict from
@@ -53,7 +56,9 @@ def evaluate_segmentation(
 
     preds = torch.cat(all_preds)
     labels = torch.cat(all_labels)
-    metrics = MetricTracker.compute_full_metrics(preds, labels, num_classes)
+    metrics = MetricTracker.compute_full_metrics(
+        preds, labels, num_classes, ignore_index=ignore_index
+    )
     MetricTracker.print_summary(prefix, metrics, class_names)
     return metrics
 
