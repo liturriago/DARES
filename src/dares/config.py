@@ -132,20 +132,20 @@ class TrainConfig(BaseModel):
             divisor of the input spatial size).
         warmup_epochs (int | None): Epochs with alignment disabled (lambda_renyi = 0).
             Kept for backward compatibility with the epoch-based schedule; the
-            SegCREDA engine ignores it in favor of its per-step ``warmup_steps``.
-        quota (int): SegCREDA per-class pixel sampling quota (M).
-        min_samples (int): SegCREDA minimum pixels per class (tau) to include a class.
-        lambda_max (float): SegCREDA peak alignment weight.
-        beta (float): SegCREDA weight of the anti-collapse term.
-        gamma (float): SegCREDA weight of the inter-class repulsion term.
-        eta_floor (float): SegCREDA absolute H2 (bits) floor for source classes.
-        entropy_gap (float): SegCREDA target-vs-source entropy gap (bits).
-        repulsion_margin (float): SegCREDA margin m (bits) of the repulsion hinge.
-        warmup_steps (int): SegCREDA steps with lambda_eff = 0 (source-only warm-up).
-        ramp_steps (int): SegCREDA sigmoid ramp length (steps) after warm-up.
-        ramp_delta (float): SegCREDA sigmoid steepness.
-        grad_ratio (float): SegCREDA grad-norm cap rho (max ||g_aux||/||g_seg||).
-        ema_decay (float): SegCREDA EMA decay for gradient norms.
+            DARESLoss engine ignores it in favor of its per-step ``warmup_steps``.
+        quota (int): DARESLoss per-class pixel sampling quota (M).
+        min_samples (int): DARESLoss minimum pixels per class (tau) to include a class.
+        lambda_max (float): DARESLoss peak alignment weight.
+        beta (float): DARESLoss weight of the anti-collapse term.
+        gamma (float): DARESLoss weight of the inter-class repulsion term.
+        eta_floor (float): DARESLoss absolute H2 (bits) floor for source classes.
+        entropy_gap (float): DARESLoss target-vs-source entropy gap (bits).
+        repulsion_margin (float): DARESLoss margin m (bits) of the repulsion hinge.
+        warmup_steps (int): DARESLoss steps with lambda_eff = 0 (source-only warm-up).
+        ramp_steps (int): DARESLoss sigmoid ramp length (steps) after warm-up.
+        ramp_delta (float): DARESLoss sigmoid steepness.
+        grad_ratio (float): DARESLoss grad-norm cap rho (max ||g_aux||/||g_seg||).
+        ema_decay (float): DARESLoss EMA decay for gradient norms.
     """
     epochs: int = Field(default=45, gt=0)
     lr: float = Field(default=1e-4, gt=0)
@@ -170,8 +170,8 @@ class TrainConfig(BaseModel):
     grid_size: int = Field(default=8, gt=0)
     warmup_epochs: int | None = None
 
-    # SegCREDA hardened alignment hyperparameters
-    quota: int = Field(default=128, gt=0)
+    # DARES hardening alignment hyperparameters (DARESLoss)
+    quota: int = Field(default=256, gt=0)
     min_samples: int = Field(default=8, gt=0)
     lambda_max: float = Field(default=1.0, ge=0.0)
     beta: float = Field(default=1.0, ge=0.0)
@@ -180,9 +180,9 @@ class TrainConfig(BaseModel):
     entropy_gap: float = Field(default=0.25, ge=0.0)
     repulsion_margin: float = Field(default=0.2, ge=0.0)
     warmup_steps: int = Field(default=1000, ge=0)
-    ramp_steps: int = Field(default=9000, ge=1)
+    ramp_steps: int = Field(default=4000, ge=1)
     ramp_delta: float = Field(default=10.0, gt=0.0)
-    grad_ratio: float = Field(default=1.0, gt=0.0)
+    grad_ratio: float = Field(default=0.8, gt=0.0)
     ema_decay: float = Field(default=0.9, gt=0.0, le=1.0)
 
     # Method selection (drives build_engine)

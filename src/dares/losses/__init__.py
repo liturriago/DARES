@@ -14,7 +14,7 @@ Method-specific losses live in sibling modules:
 * ``cbst``  ->  class-balanced pseudo-label selection / self-training loss.
 * ``renyi``  ->  the base DARES alpha-Renyi alignment loss (sampling operator
   ``Phi_c`` and matrix-based mutual information).
-* ``segcreda``  ->  the hardened SegCREDA alignment (anti-collapse entropy
+* ``dares_loss``  ->  the hardened DARES alignment loss (anti-collapse entropy
   floors, inter-class target repulsion and a GradNorm-lite trust region).
 """
 from dares.losses.ce import SegCrossEntropyLoss

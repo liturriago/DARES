@@ -1,4 +1,4 @@
-"""Focused tests for the hardened SegCREDA loss mechanics.
+"""Focused tests for the hardened DARES loss mechanics.
 
 Covers the three hardened safeguards from ``Docs/KimiReport.txt``:
 anti-collapse entropy floors, asymmetric (stop-gradient) anchoring, the
@@ -10,7 +10,7 @@ import math
 import pytest
 import torch
 
-from dares.losses.segcreda import SegCREDALoss
+from dares.losses.dares_loss import DARESLoss
 
 
 def _feats(n=2, h=16, w=16, d=8, seed=0):
@@ -23,7 +23,7 @@ def _feats(n=2, h=16, w=16, d=8, seed=0):
 
 def test_anti_collapse_penalizes_degenerate(class_collapsed=True):
     """Collapsed class features push H2 below the floor and activate L_ac."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0, eta_floor=1.0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0, eta_floor=1.0)
     n, h, w, d = 2, 16, 16, 8
     fs = torch.randn(n, d, h, w)
     ft = torch.zeros(n, 1, h, w).repeat(1, d, 1, 1)  # collapsed target
@@ -42,7 +42,7 @@ def test_anti_collapse_penalizes_degenerate(class_collapsed=True):
 def test_anti_collapse_inactive_for_healthy():
     """Well-spread classes keep H2 above the floor so L_ac stays ~0."""
     torch.manual_seed(0)
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0, eta_floor=1.0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0, eta_floor=1.0)
     fs, ft, ls = _feats(seed=3)
     # Scale up the dispersion so both H2_source and H2_target comfortably clear
     # the eta_floor and the entropy-gap floor.
@@ -60,7 +60,7 @@ def test_anti_collapse_inactive_for_healthy():
 
 def test_asymmetric_anchor_source_aux_grad_is_zero():
     """L_aux pushes no gradient into source features (sg(feat_s))."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
     fs, ft, ls = _feats(seed=1)
     fs.requires_grad_(True)
     ft.requires_grad_(True)
@@ -77,7 +77,7 @@ def test_asymmetric_anchor_source_aux_grad_is_zero():
 
 def test_repulsion_active_for_overlapping_target_classes():
     """Overlapping target classes produce a positive repulsion loss."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0, repulsion_margin=0.2)
+    crit = DARESLoss(num_classes=2, warmup_steps=0, repulsion_margin=0.2)
     fs = torch.randn(2, 8, 16, 16)
     # Target features identical across the two classes -> overlap.
     ft = torch.randn(4, 8, 16, 16)
@@ -96,7 +96,7 @@ def test_repulsion_active_for_overlapping_target_classes():
 
 def test_trust_region_caps_aux_gradient_ratio():
     """lambda_eff <= grad_ratio * g_seg / g_aux (with EMA smoothing)."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0, grad_ratio=1.0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0, grad_ratio=1.0)
     p = torch.nn.Parameter(torch.randn(6, 6))
     loss_seg = (p * 2.0).sum()
     loss_aux = (p * 0.2).sum()
@@ -111,7 +111,7 @@ def test_trust_region_caps_aux_gradient_ratio():
 
 def test_isolated_fp32_under_amp():
     """Kernel math stays finite and fp32 even inside an autocast region."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
     fs, ft, ls = _feats(seed=7)
     logits_s = torch.randn(2, 2, 16, 16)
     logits_t = torch.randn(2, 2, 16, 16)
@@ -126,7 +126,7 @@ def test_isolated_fp32_under_amp():
 
 def test_missing_class_skipped_gracefully():
     """A class absent from the batch is skipped without NaN."""
-    crit = SegCREDALoss(num_classes=2, min_samples=8, warmup_steps=0)
+    crit = DARESLoss(num_classes=2, min_samples=8, warmup_steps=0)
     fs = torch.randn(1, 8, 16, 16)
     ft = torch.randn(1, 8, 16, 16)
     ls = torch.zeros(1, 16, 16, dtype=torch.long)  # only class 0

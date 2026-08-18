@@ -63,7 +63,7 @@ class Encoder(nn.Module, ABC):
     def reference_params(self) -> list[nn.Parameter]:
         """Parameters of the deepest shared encoder block.
 
-        Used by the SegCREDA trust-region gradient balancing to anchor the
+        Used by the DARES trust-region gradient balancing to anchor the
         auxiliary alignment gradient to the segmentation gradient (GradNorm-lite,
         see ``Docs/KimiReport.txt`` Section 4b). Concrete encoders override it to
         return the last stage / bottleneck block (e.g. ``layer4`` of a ResNet).

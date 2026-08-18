@@ -11,7 +11,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 
 - **Five UDA methods** under one shared training interface: Source-Only baseline, ADVENT, CyCADA, CBST and **DARES** (the proposed α-Rényi alignment).
 - **Pluggable architecture matrix:** backbones (ResNet50, ConvNeXt-Tiny, Swin-T) × segmentation heads (ResUNet decoder, DeepLabV3+ ASPP).
-- **DARES core loss (SegCREDA):** hardened class-conditional order-2 Rényi alignment over Gaussian Gram matrices with median-heuristic kernel bandwidth, per-pixel Rényi-2 confidence weighting, anti-collapse spectral entropy floors (`H2 ≥ η`), margin-hinged inter-class target repulsion, and a per-step GradNorm-lite trust region on the deepest encoder block.
+- **DARES core loss (DARESLoss):** hardened class-conditional order-2 Rényi alignment over Gaussian Gram matrices with median-heuristic kernel bandwidth, per-pixel Rényi-2 confidence weighting, anti-collapse spectral entropy floors (`H2 ≥ η`), margin-hinged inter-class target repulsion, and a per-step GradNorm-lite trust region on the deepest encoder block.
 - **CREDA dynamic alignment schedule:** the Rényi weight follows the per-step sigmoid ramp `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` (CREDA Eq. 29 + GradNorm-lite EMA), so the alignment ramps in smoothly and can never dominate the supervised gradient.
 - **HDF5 data pipeline** (`float32` 4-band patches, LZF compression) with lazy, worker-safe dataset loading.
 - **Segmentation metrics:** per-class and mean IoU, DICE (F1), Overall Accuracy, MCC, plus per-class precision/recall.
@@ -26,7 +26,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 | `advent` | Adversarial | Entropy-map domain discriminator + target entropy minimization. |
 | `cycada` | Adversarial | Cycle-consistent pixel translation + feature adversarial alignment. |
 | `cbst` | Self-training | Class-balanced pseudo-label selection with masked CE. |
-| `dares` | Info-theoretic | `L = L_seg + λ_eff·(L_align + β·L_ac + γ·L_rep)` — hardened SegCREDA class-conditional Rényi alignment with anti-collapse entropy floors, margin-hinged target repulsion and a per-step gradient trust region `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)`. |
+| `dares` | Info-theoretic | `L = L_seg + λ_eff·(L_align + β·L_ac + γ·L_rep)` — hardened DARES class-conditional Rényi alignment with anti-collapse entropy floors, margin-hinged target repulsion and a per-step gradient trust region `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)`. |
 
 ## Installation
 
@@ -99,7 +99,7 @@ training:
   epochs: 25
   lr: 0.0001
   device: "cuda"
-  quota: 128            # M — pixels sampled per class per batch
+  quota: 256            # M — pixels sampled per class per batch
   min_samples: 8        # tau — class must have >= this many pixels
   lambda_max: 1.0       # peak alignment weight
   beta: 1.0             # anti-collapse term weight
@@ -108,9 +108,9 @@ training:
   entropy_gap: 0.25     # target must stay within gap of source H2 (bits)
   repulsion_margin: 0.2 # hinge margin m (bits) for target repulsion
   warmup_steps: 1000    # steps with lambda_eff = 0 (source-only warm-up)
-  ramp_steps: 9000      # sigmoid ramp length (steps)
+  ramp_steps: 4000      # sigmoid ramp length (steps)
   ramp_delta: 10.0      # sigmoid steepness
-  grad_ratio: 1.0       # rho — max ||g_aux||/||g_seg|| trust-region cap
+  grad_ratio: 0.8       # rho — max ||g_aux||/||g_seg|| trust-region cap
   ema_decay: 0.9        # EMA decay for gradient norms
 
 experiment:
@@ -187,7 +187,7 @@ src/dares/
 ├── config.py            # Pydantic configs (data / model / training / experiment)
 ├── data/                # HDF5Dataset, pair transforms, collate, DARESDataLoader
 ├── models/              # backbones (resnet50, convnext, swin) + heads (resunet, deeplabv3p) + SegmentationModel
-├── losses/              # CE, domain (discriminator), advent, cycada, cbst, renyi, segcreda (DARES)
+├── losses/              # CE, domain (discriminator), advent, cycada, cbst, renyi, dares_loss (DARES)
 ├── engines/             # source_only, advent, cycada, cbst, dares trainers + registry
 ├── training/            # BaseTrainer (AMP, evaluation, checkpointing, fit loop)
 └── utils/               # metrics (mIoU/DICE/OA/MCC), evaluation, visualizer, reproducibility

@@ -32,7 +32,7 @@ training:
   grid_size: 12
   schedule_delta: 12
   warmup_epochs: 2
-  quota: 128
+  quota: 256
   min_samples: 8
   lambda_max: 1.0
   beta: 1.0
@@ -41,9 +41,9 @@ training:
   entropy_gap: 0.25
   repulsion_margin: 0.2
   warmup_steps: 1000
-  ramp_steps: 9000
+  ramp_steps: 4000
   ramp_delta: 10.0
-  grad_ratio: 1.0
+  grad_ratio: 0.8
   ema_decay: 0.9
 experiment:
   name: "resnet50_resunet_dares"

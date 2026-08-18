@@ -1,15 +1,15 @@
-"""DARES training engine: source cross-entropy plus hardened SegCREDA alignment.
+"""DARES training engine: source cross-entropy plus hardened DARES alignment.
 
 The DARES objective combines the supervised segmentation loss on the source
 domain with the class-conditional Renyi-2 alignment on unlabeled target
-batches. This engine uses the hardened ``SegCREDALoss`` (``Docs/SegCREDA.py``),
-which adds anti-collapse entropy floors, inter-class target repulsion and a
-per-step GradNorm-lite trust region on the reference (deepest encoder block)
-parameters.
+batches. This engine uses the hardened ``DARESLoss`` (ported from the
+reference module in ``Docs/``), which adds anti-collapse entropy floors,
+inter-class target repulsion and a per-step GradNorm-lite trust region on the
+reference (deepest encoder block) parameters.
 
 ``L = L_seg + lambda_eff * (L_align + beta * L_ac + gamma * L_rep)``
 
-where ``lambda_eff`` is scheduled per-step by :meth:`SegCREDALoss.update_lambda`
+where ``lambda_eff`` is scheduled per-step by :meth:`DARESLoss.update_lambda`
 (warm-up -> sigmoid ramp -> gradient-ratio cap) instead of by epoch.
 """
 
@@ -22,7 +22,7 @@ from torch.amp import autocast
 from tqdm import tqdm
 
 from dares.config import TrainConfig
-from dares.losses.segcreda import SegCREDALoss
+from dares.losses.dares_loss import DARESLoss
 from dares.training.base_trainer import BaseTrainer
 
 
@@ -45,8 +45,8 @@ class DARESTrainer(BaseTrainer):
 
     Attributes
     ----------
-    criterion : SegCREDALoss
-        The hardened class-conditional Renyi-2 alignment loss (SegCREDA).
+    criterion : DARESLoss
+        The hardened class-conditional Renyi-2 alignment loss (DARES).
     ref_params : list[torch.Tensor]
         Reference parameters for the trust-region gradient balancing (the
         deepest shared encoder block).
@@ -62,9 +62,9 @@ class DARESTrainer(BaseTrainer):
         config: TrainConfig,
         device: torch.device,
     ) -> None:
-        """Initializes the SegCREDA criterion, reference params and optimizer."""
+        """Initializes the DARES criterion, reference params and optimizer."""
         super().__init__(model, source_loaders, target_loaders, config, device)
-        self.criterion = SegCREDALoss(
+        self.criterion = DARESLoss(
             num_classes=self.num_classes,
             quota=config.quota,
             min_samples=config.min_samples,
@@ -87,7 +87,7 @@ class DARESTrainer(BaseTrainer):
         """Runs one epoch of DARES training.
 
         Pairs source and target batches with ``_dual_iterators``. For each pair
-        computes the SegCREDA alignment over the deepest encoder features and
+        computes the DARES alignment over the deepest encoder features and
         calls :meth:`update_lambda` (after forward, before backward) so the
         alignment weight follows the per-step trust region.
 

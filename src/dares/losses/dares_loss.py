@@ -1,8 +1,9 @@
-"""SegCREDA: hardened class-conditional Renyi-2 alignment for UDA segmentation.
+"""DARESLoss: hardened class-conditional Renyi-2 alignment for UDA segmentation.
 
-This is the reference module from ``Docs/SegCREDA.py`` (theory in
-``Docs/KimiReport.txt``), cleaned to match the DARES codebase conventions. It
-extends the base CREDA alignment with three safeguards:
+This is the DARES adaptation loss, ported from the reference module shipped in
+``Docs/`` (theory in ``Docs/KimiReport.txt``) and cleaned to match the DARES
+codebase conventions. It extends the base CREDA alignment with three
+safeguards:
 
   1. Intra-class variance collapse is prevented by spectral entropy floors
      ``H2(K_c) >= eta`` (anti-collapse) with asymmetric stop-gradient anchoring:
@@ -30,7 +31,7 @@ import torch.nn.functional as F
 _LN2 = math.log(2.0)
 
 
-class SegCREDALoss(nn.Module):
+class DARESLoss(nn.Module):
     """CREDA-style Renyi-2 alignment hardened for dense segmentation.
 
     Args:
@@ -60,7 +61,7 @@ class SegCREDALoss(nn.Module):
     def __init__(
         self,
         num_classes: int,
-        quota: int = 128,
+        quota: int = 256,
         min_samples: int = 8,
         lambda_max: float = 1.0,
         beta: float = 1.0,
@@ -69,9 +70,9 @@ class SegCREDALoss(nn.Module):
         entropy_gap: float = 0.25,
         repulsion_margin: float = 0.2,
         warmup_steps: int = 1000,
-        ramp_steps: int = 9000,
+        ramp_steps: int = 4000,
         ramp_delta: float = 10.0,
-        grad_ratio: float = 1.0,
+        grad_ratio: float = 0.8,
         ema_decay: float = 0.9,
         weight_cross: bool = False,
         normalize_features: bool = False,
@@ -167,7 +168,7 @@ class SegCREDALoss(nn.Module):
 
     # ---------------------------------------------------------------- forward
     def forward(self, feat_s, logits_s, labels_s, feat_t, logits_t):
-        """Computes the SegCREDA objective.
+        """Computes the DARES objective.
 
         Args:
             feat_s (torch.Tensor): Source deep features ``(Bs, d, h, w)``.

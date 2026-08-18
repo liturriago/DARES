@@ -1,4 +1,4 @@
-"""Tests for the DARES (SegCREDA hardened alignment) training engine."""
+"""Tests for the DARES (DARES hardened alignment) training engine."""
 
 import math
 from pathlib import Path
@@ -12,7 +12,7 @@ import torch.nn as nn
 from dares.config import DataConfig, ModelConfig, TrainConfig
 from dares.data import DARESDataLoader
 from dares.engines.dares import DARESTrainer
-from dares.losses.segcreda import SegCREDALoss
+from dares.losses.dares_loss import DARESLoss
 from dares.models.segmentation import build_model
 
 METRIC_KEYS = {
@@ -99,7 +99,7 @@ def _build_fixtures(tmp_path: Path, **train_overrides):
 
 
 def test_fit_returns_model_and_tracks_history(tmp_path):
-    """fit() returns the model and records the SegCREDA loss history."""
+    """fit() returns the model and records the DARES loss history."""
     model, source_loaders, target_loaders, config, device = _build_fixtures(
         tmp_path
     )
@@ -117,7 +117,7 @@ def test_fit_returns_model_and_tracks_history(tmp_path):
 
 
 def test_train_epoch_returns_all_diagnostics(tmp_path):
-    """train_epoch() returns the full SegCREDA diagnostic set + epoch_time."""
+    """train_epoch() returns the full DARES diagnostic set + epoch_time."""
     model, source_loaders, target_loaders, config, device = _build_fixtures(
         tmp_path
     )
@@ -148,7 +148,7 @@ def test_reference_params_are_the_deep_encoder_block(tmp_path):
 
 def test_update_lambda_warmup_zeroes_effective_lambda():
     """Before warmup_steps, lambda_eff stays 0 and step advances."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=5)
+    crit = DARESLoss(num_classes=2, warmup_steps=5)
     params = [
         torch.nn.Parameter(torch.randn(4, 4)),
         torch.nn.Parameter(torch.randn(4)),
@@ -165,7 +165,7 @@ def test_update_lambda_warmup_zeroes_effective_lambda():
 
 def test_update_lambda_grows_after_warmup():
     """After warmup, lambda_eff rises with the sigmoid ramp (nonzero)."""
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0, ramp_steps=10)
+    crit = DARESLoss(num_classes=2, warmup_steps=0, ramp_steps=10)
     p = torch.nn.Parameter(torch.randn(4, 4))
 
     loss_seg = (p * 1.0).sum()
@@ -179,10 +179,10 @@ def test_update_lambda_grows_after_warmup():
     assert crit.lambda_eff.item() == pytest.approx(lam, abs=1e-5)
 
 
-def test_segcreda_forward_backward_finite():
-    """A single SegCREDA forward + update_lambda + backward is finite."""
+def test_dares_loss_forward_backward_finite():
+    """A single DARES loss forward + update_lambda + backward is finite."""
     torch.manual_seed(0)
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
     fs = torch.randn(2, 8, 8, 8, requires_grad=True)
     ft = torch.randn(2, 8, 8, 8, requires_grad=True)
     ls = torch.randint(0, 2, (2, 8, 8))
@@ -200,10 +200,10 @@ def test_segcreda_forward_backward_finite():
     assert bool(torch.isfinite(fs.grad).all())
 
 
-def test_segcreda_asymmetric_anchor_source_grad_zero():
+def test_dares_loss_asymmetric_anchor_source_grad_zero():
     """Source features receive no alignment gradient (asymmetric anchoring)."""
     torch.manual_seed(1)
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
     fs = torch.randn(2, 8, 8, 8, requires_grad=True)
     ft = torch.randn(2, 8, 8, 8, requires_grad=True)
     ls = torch.randint(0, 2, (2, 8, 8))
@@ -217,10 +217,10 @@ def test_segcreda_asymmetric_anchor_source_grad_zero():
     assert torch.all(fs.grad == 0)
 
 
-def test_segcreda_amp_safe_under_autocast():
+def test_dares_loss_amp_safe_under_autocast():
     """Runs the loss under torch.autocast without dtype errors."""
     torch.manual_seed(2)
-    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
     fs = torch.randn(2, 8, 8, 8)
     ft = torch.randn(2, 8, 8, 8)
     ls = torch.randint(0, 2, (2, 8, 8))
