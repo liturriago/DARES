@@ -318,3 +318,71 @@ def test_dares_loader_resolves_data_root(tmp_path):
     images, masks = next(iter(source_loaders["train"]))
     assert images.shape == (2, 4, 64, 64)
     assert masks.shape == (2, 64, 64)
+
+
+def test_container_filename_variants():
+    """Source uses base names; target follows the LIME variant naming."""
+    from dares.data.loader import container_filename
+
+    assert container_filename("source", "train") == "source_train.h5"
+    assert container_filename("source", "validation") == "source_val.h5"
+    assert container_filename("source", "test") == "source_test.h5"
+    assert container_filename("target", "train") == "target_train.h5"
+    assert container_filename("target", "validation") == "target_val.h5"
+    assert container_filename("target", "test") == "target_test.h5"
+    assert container_filename("target", "train", "low") == "target_train_lime_low.h5"
+    assert container_filename("target", "test", "medium") == "target_test_lime_med.h5"
+    assert container_filename("target", "validation", "high") == "target_val_lime_high.h5"
+
+    with pytest.raises(ValueError):
+        container_filename("target", "train", "extreme")
+    with pytest.raises(ValueError):
+        container_filename("target", "banana")
+
+
+def test_dares_loader_lime_variant(tmp_path):
+    """target_variant selects the _lime_* containers inside the variant folder."""
+    src_dir = tmp_path / "Source"
+    tgt_dir = tmp_path / "Target_Medium"
+    src_dir.mkdir(parents=True)
+    tgt_dir.mkdir(parents=True)
+    for fragment in ("train", "val", "test"):
+        make_h5(src_dir / f"source_{fragment}.h5", num_patches=2)
+        make_h5(tgt_dir / f"target_{fragment}_lime_med.h5", num_patches=2)
+
+    config = DataConfig(
+        source_dir=src_dir,
+        target_dir=tgt_dir,
+        target_variant="medium",
+        batch_size=2,
+        num_workers=0,
+    )
+    loader = DARESDataLoader(config)
+
+    source_loaders = loader.get_source_loaders()
+    target_loaders = loader.get_target_loaders()
+    assert set(source_loaders) == {"train", "validation", "test"}
+    assert set(target_loaders) == {"train", "validation", "test"}
+
+    images, masks = next(iter(target_loaders["train"]))
+    assert images.shape == (2, 4, 64, 64)
+    assert masks is None
+    images, masks = next(iter(target_loaders["test"]))
+    assert masks.shape == (2, 64, 64)
+
+
+def test_dares_loader_variant_mismatch_raises(tmp_path):
+    """A base-named target dir with target_variant='low' reports the LIME file."""
+    _make_six_containers(tmp_path)
+    config = DataConfig(
+        source_dir=tmp_path,
+        target_dir=tmp_path,
+        target_variant="low",
+        batch_size=2,
+        num_workers=0,
+    )
+    loader = DARESDataLoader(config)
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        loader.get_target_loaders()
+    assert "target_train_lime_low.h5" in str(exc_info.value)

@@ -19,12 +19,65 @@ SPLIT_FILENAMES: dict[str, str] = {
     "test": "{}_test.h5",
 }
 
+_TARGET_VARIANT_SUFFIX: dict[str, str] = {
+    "original": "",
+    "low": "_lime_low",
+    "medium": "_lime_med",
+    "high": "_lime_high",
+}
+
+_TARGET_SPLIT_FRAGMENT: dict[str, str] = {
+    "train": "train",
+    "validation": "val",
+    "test": "test",
+}
+
 __all__ = [
     "DARESDataLoader",
     "HDF5Dataset",
     "dares_collate",
     "SegmentationTransforms",
+    "container_filename",
 ]
+
+
+def container_filename(
+    domain: str, split: str, target_variant: str = "original"
+) -> str:
+    """Resolves the HDF5 container filename for a domain and split.
+
+    Source containers always use the base ``source_{train,val,test}.h5``
+    naming. Target containers depend on the selected LIME degradation tier:
+    ``"original"`` maps to ``target_{train,val,test}.h5`` while the perturbed
+    tiers map to ``target_{train,val,test}_lime_{low,med,high}.h5`` (see
+    ``Docs/data.md`` section 6.1).
+
+    Args:
+        domain (str): ``"source"`` or ``"target"``.
+        split (str): ``"train"``, ``"validation"`` or ``"test"``.
+        target_variant (str): Target degradation tier (``"original"``,
+            ``"low"``, ``"medium"`` or ``"high"``).
+
+    Returns:
+        str: The HDF5 container filename for the split.
+
+    Raises:
+        ValueError: If ``split`` is not one of the known splits or
+            ``target_variant`` is unknown.
+    """
+    if split not in _TARGET_SPLIT_FRAGMENT:
+        raise ValueError(f"unknown split {split!r}; expected train/validation/test")
+    if target_variant not in _TARGET_VARIANT_SUFFIX:
+        raise ValueError(
+            f"unknown target_variant {target_variant!r}; "
+            "expected original/low/medium/high"
+        )
+    if domain == "source":
+        return SPLIT_FILENAMES[split].format(domain)
+    return (
+        f"target_{_TARGET_SPLIT_FRAGMENT[split]}"
+        f"{_TARGET_VARIANT_SUFFIX[target_variant]}.h5"
+    )
 
 
 class DARESDataLoader:
@@ -123,7 +176,9 @@ class DARESDataLoader:
         domain_dir = self.config.resolved_dir(f"{domain}_dir")
         loaders: dict[str, DataLoader] = {}
         for split in splits:
-            file_path = Path(domain_dir) / SPLIT_FILENAMES[split].format(domain)
+            file_path = Path(domain_dir) / container_filename(
+                domain, split, self.config.target_variant
+            )
             if not file_path.is_file():
                 raise FileNotFoundError(
                     f"split container not found at {file_path}"

@@ -16,7 +16,7 @@ import h5py
 import numpy as np
 
 from dares.config import ExperimentConfig
-from dares.data.loader import SPLIT_FILENAMES
+from dares.data.loader import SPLIT_FILENAMES, container_filename
 
 FOREST_RATIO_RANGE = (0.15, 0.85)
 IGNORE_VALUE = 255  # water / wetland pixels per Docs/data.md
@@ -89,13 +89,18 @@ def main(
     source_dir: str,
     target_dir: str,
     batch_size: int = 8,
+    target_variant: str = "original",
 ) -> None:
     """Validates all six containers and prints a summary table.
 
     Args:
         source_dir (str): Directory containing ``source_*.h5``.
-        target_dir (str): Directory containing ``target_*.h5``.
+        target_dir (str): Directory containing the target containers of the
+            selected ``target_variant``.
         batch_size (int): Training batch size (affects the batch-count report).
+        target_variant (str): Target degradation tier (``"original"``,
+            ``"low"``, ``"medium"`` or ``"high"``) selecting the target
+            container naming (``target_*.h5`` vs ``target_*_lime_*.h5``).
     """
     header = (
         f"{'file':<22}{'split':<11}{'N':>6}{'shape':>12}{'dtype':>9}"
@@ -112,8 +117,10 @@ def main(
         domain_path = Path(domain_dir)
         if not domain_path.is_dir():
             raise FileNotFoundError(f"domain directory not found: {domain_path}")
-        for split, filename in SPLIT_FILENAMES.items():
-            path = domain_path / filename.format(domain)
+        for split, _ in SPLIT_FILENAMES.items():
+            path = domain_path / container_filename(
+                domain, split, target_variant
+            )
             if not path.is_file():
                 raise FileNotFoundError(f"split container not found: {path}")
             info = _check_container(path, split, batch_size)
@@ -162,6 +169,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--target_dir", type=str, default=None, help="Target domain directory"
     )
+    parser.add_argument(
+        "--target_variant",
+        type=str,
+        default="original",
+        choices=["original", "low", "medium", "high"],
+        help="Target LIME degradation tier selecting the container naming",
+    )
     parser.add_argument("--batch_size", type=int, default=None)
     args = parser.parse_args()
 
@@ -170,13 +184,20 @@ if __name__ == "__main__":
         source_dir = str(cfg.data.resolved_dir("source_dir"))
         target_dir = str(cfg.data.resolved_dir("target_dir"))
         batch_size = cfg.data.batch_size if args.batch_size is None else args.batch_size
+        target_variant = cfg.data.target_variant
         print(f"Using data dirs from {args.config}")
         print(f"  source_dir = {source_dir}")
         print(f"  target_dir = {target_dir}")
-        main(source_dir, target_dir, batch_size)
+        print(f"  target_variant = {target_variant}")
+        main(source_dir, target_dir, batch_size, target_variant)
     else:
         if args.source_dir is None or args.target_dir is None:
             raise SystemExit(
                 "provide --config OR both --source_dir and --target_dir"
             )
-        main(args.source_dir, args.target_dir, args.batch_size or 8)
+        main(
+            args.source_dir,
+            args.target_dir,
+            args.batch_size or 8,
+            args.target_variant,
+        )

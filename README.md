@@ -41,22 +41,26 @@ Requires Python ≥ 3.9, PyTorch ≥ 2.0 and torchvision. On Kaggle, `pip instal
 
 ## Dataset
 
-The pre-processed dataset is published as a public Kaggle dataset (all six containers in one folder):
+The pre-processed dataset is published as a public Kaggle dataset, organized as
+one folder per target degradation variant:
 
 ```
 /kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/
+├── Source/              # source_train.h5 | source_val.h5 | source_test.h5
+├── Target_Original/     # target_train.h5  | target_val.h5  | target_test.h5
+├── Target_Low/          # target_*_lime_low.h5     (LIME severity pool {0.1, 0.2})
+├── Target_Medium/       # target_*_lime_med.h5     (LIME severity pool {0.3, 0.4, 0.5})
+└── Target_High/         # target_*_lime_high.h5    (LIME severity pool {0.6, 0.7})
 ```
 
-| Container | Domain | Split | Patches | Image | Mask |
-| --- | --- | --- | --- | --- | --- |
-| `source_train.h5` | Source (Brazil) | Train | 3,944 | `(N, 4, 224, 224)` f32 | `(N, 224, 224)` u8 |
-| `source_val.h5` | Source (Brazil) | Validation | 1,108 | … | … |
-| `source_test.h5` | Source (Brazil) | Test | 633 | … | … |
-| `target_train.h5` | Target (Colombia) | Train | 3,711 | … | … |
-| `target_val.h5` | Target (Colombia) | Validation | 894 | … | … |
-| `target_test.h5` | Target (Colombia) | Test | 589 | … | … |
-
-See [`Docs/data.md`](Docs/data.md) for the full data-engineering specification (band configuration, water masking, class-balance filtering, sliding-window extraction).
+Every container stores `(N, 4, 224, 224)` float32 images and `(N, 224, 224)`
+uint8 masks. Water (`WorldCover 80`) and wetland (`WorldCover 90`) pixels are
+encoded as `255` with `ignore_index=255` in the loss and excluded from all
+metrics. The target LIME variants simulate atmospheric attenuation and
+illumination non-homogeneity at increasing severity (controlled radiometric
+covariate shift). See [`Docs/data.md`](Docs/data.md) for the full
+data-engineering specification (band configuration, water masking,
+class-balance filtering, sliding-window extraction).
 
 ## Configuration
 
@@ -76,8 +80,9 @@ Example (`configs/training/resnet50_resunet/dares.yaml`):
 
 ```yaml
 data:
-  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda"
-  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda"
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Target_Medium"
+  target_variant: medium       # original | low | medium | high (selects target container naming)
   batch_size: 8
   patch_size: 224
   num_workers: 4
@@ -136,8 +141,26 @@ input/ground-truth/prediction overlay.
 python scripts/check_data.py --config configs/training/resnet50_resunet/dares.yaml
 ```
 
-Reports keys, shapes, dtypes, compression, per-split forest ratio (validates the [15%, 85%]
-balance protocol) and batches per epoch.
+Reports keys, shapes, dtypes, compression, per-split forest ratio (over valid,
+non-water pixels; validates the [15%, 85%] balance protocol) and batches per
+epoch. For a LIME tier, pass its container set explicitly:
+
+```bash
+python scripts/check_data.py \
+    --source_dir .../Source --target_dir .../Target_High --target_variant high
+```
+
+### Stress-test variants (EXP-05…07)
+
+Training a LIME degradation tier is just a different `target_dir` +
+`target_variant` in the config:
+
+```yaml
+data:
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Target_High"
+  target_variant: high
+```
 
 ### Kaggle notebook
 

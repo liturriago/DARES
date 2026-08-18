@@ -11,10 +11,15 @@ class DataConfig(BaseModel):
     Attributes:
         source_dir (Path): Directory containing the source domain HDF5 containers
             (source_train.h5, source_val.h5, source_test.h5). May be an absolute
-            path (e.g. a Kaggle mount ``/kaggle/input/<dataset>/source``) or a
+            path (e.g. a Kaggle mount ``/kaggle/input/<dataset>/Source``) or a
             path relative to ``data_root``.
-        target_dir (Path): Directory containing the target domain HDF5 containers
-            (target_train.h5, target_val.h5, target_test.h5).
+        target_dir (Path): Directory containing the target domain HDF5 containers.
+            Points at a single variant folder (e.g. ``Target_Original``,
+            ``Target_Low``, ``Target_Medium`` or ``Target_High``); the container
+            filenames inside are selected by ``target_variant``.
+        target_variant (Literal): Target degradation tier. ``"original"`` reads
+            ``target_{split}.h5``; the LIME tiers read
+            ``target_{split}_lime_{low,med,high}.h5`` respectively.
         data_root (Path | None): Optional root used to resolve relative
             ``source_dir`` / ``target_dir`` (portable between local and Kaggle).
         batch_size (int): Number of patches per batch.
@@ -27,6 +32,7 @@ class DataConfig(BaseModel):
     """
     source_dir: Path
     target_dir: Path
+    target_variant: Literal["original", "low", "medium", "high"] = "original"
     data_root: Path | None = None
     batch_size: int = Field(default=8, gt=0)
     patch_size: int = Field(default=224, gt=0)
