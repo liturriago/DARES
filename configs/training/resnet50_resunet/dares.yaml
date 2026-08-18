@@ -24,14 +24,14 @@ training:
   use_amp: true
   device: "cuda"
   seed: 42
-  lambda_renyi: 0.2
-  tau: 0.8
-  n_max: 1024
+  lambda_renyi: 0.03
+  tau: 0.85
+  n_max: 512
   sigma: "auto"
   alpha: 2
-  grid_size: 16
+  grid_size: 8
   schedule_delta: 12
-  warmup_epochs: 2
+  warmup_epochs: 5
 experiment:
   name: "resnet50_resunet_dares"
   version: 1
