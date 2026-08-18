@@ -45,7 +45,7 @@ The pre-processed dataset is published as a public Kaggle dataset, organized as
 one folder per target degradation variant:
 
 ```
-/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/
+/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/
 ├── Source/              # source_train.h5 | source_val.h5 | source_test.h5
 ├── Target_Original/     # target_train.h5  | target_val.h5  | target_test.h5
 ├── Target_Low/          # target_*_lime_low.h5     (LIME severity pool {0.1, 0.2})
@@ -80,8 +80,8 @@ Example (`configs/training/resnet50_resunet/dares.yaml`):
 
 ```yaml
 data:
-  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Source"
-  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Target_Medium"
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Medium"
   target_variant: medium       # original | low | medium | high (selects target container naming)
   batch_size: 8
   patch_size: 224
@@ -157,8 +157,8 @@ Training a LIME degradation tier is just a different `target_dir` +
 
 ```yaml
 data:
-  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Source"
-  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-deforestation-uda/Target_High"
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_High"
   target_variant: high
 ```
 
