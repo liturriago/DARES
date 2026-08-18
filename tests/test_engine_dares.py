@@ -232,3 +232,36 @@ def test_dares_loss_amp_safe_under_autocast():
 
     assert torch.isfinite(total)
     assert total.dtype == torch.float32
+
+
+def test_warmup_epochs_freeze_unfreeze_lifecycle(tmp_path):
+    """fit() freezes the backbone for warmup_epochs then unfreezes it, and
+    keeps lambda_eff at 0 while step < warmup_steps."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, epochs=3, warmup_epochs=2, warmup_steps=1000
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    # Before fit(): backbone ref params are unfrozen by default.
+    assert all(p.requires_grad for p in engine.ref_params)
+
+    engine.fit()
+
+    # After warmup_epochs, the backbone must be fully unfrozen.
+    assert all(p.requires_grad for p in engine.ref_params)
+    # With 8 train patches / batch_size 2 = 4 batches/epoch * 2 epochs = 8 < 1000,
+    # lambda_eff stayed 0 throughout warmup.
+    assert all(l == 0.0 for l in engine.history["lambda_eff"])
+
+
+def test_lambda_eff_zero_during_warmup_steps(tmp_path):
+    """Alignment weight is exactly 0 while the criterion step < warmup_steps."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, warmup_steps=10_000, warmup_epochs=None
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    metrics = engine.train_epoch()
+
+    assert metrics["lambda_eff"] == 0.0
+    assert int(engine.criterion.step.item()) > 0

@@ -339,11 +339,13 @@ class DARESLoss(nn.Module):
             self.lambda_eff.zero_()
             return 0.0
 
-        ref = list(ref_params)
+        ref = [r for r in ref_params if r.requires_grad]
 
         def safe_grad(loss):
             if not isinstance(loss, torch.Tensor) or not loss.requires_grad:
                 return [None] * len(ref)
+            if not ref:
+                return []
             return torch.autograd.grad(loss, ref, retain_graph=True, allow_unused=True)
 
         g_s = safe_grad(loss_seg)

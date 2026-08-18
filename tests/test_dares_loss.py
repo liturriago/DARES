@@ -137,3 +137,31 @@ def test_missing_class_skipped_gracefully():
 
     assert torch.isfinite(total)
     assert parts["n_valid_classes"].item() <= 1
+
+
+def test_update_lambda_safe_with_frozen_ref_params():
+    """update_lambda must not crash on reference params with requires_grad=False
+    (Phase 1, backbone frozen) even when the loss is disconnected from them."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
+    # Frozen reference block (as during backbone warm-up).
+    p = torch.nn.Parameter(torch.randn(4, 4), requires_grad=False)
+    loss_seg = (torch.randn(4, 4) @ p.detach() * 1.0).sum()  # disconnected
+    loss_aux = torch.randn((), requires_grad=True)            # disconnected leaf
+
+    lam = crit.update_lambda(loss_seg, loss_aux, [p])
+
+    assert lam == 0.0  # no gradient anchors -> ratio 0
+    assert torch.isfinite(crit.lambda_eff)
+
+
+def test_step_counter_is_monotonic_across_update_lambda():
+    """self.step advances by exactly one per update_lambda call (per batch)."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
+    p = torch.nn.Parameter(torch.randn(4, 4), requires_grad=True)
+    base = int(crit.step.item())
+
+    for i in range(5):
+        out = torch.randn(8, 4) @ p
+        crit.update_lambda(out.sum(), (out * 0.5).sum(), [p])
+
+    assert int(crit.step.item()) == base + 5
