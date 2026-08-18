@@ -48,27 +48,32 @@ class SegmentationModel(nn.Module):
         Args:
             x (torch.Tensor): Input tensor of shape ``(B, C_in, H, W)`` with
                 ``H`` and ``W`` multiples of 32.
-            mode (str): Output mode, one of ``"class"``, ``"feature"`` or
-                ``"both"`` (default ``"class"``).
+            mode (str): Output mode, one of ``"class"``, ``"feature"``,
+                ``"both"`` or ``"deep"`` (default ``"class"``).
 
         Returns:
             torch.Tensor | tuple[torch.Tensor, torch.Tensor]: Class logits of
                 shape ``(B, C, H, W)`` for ``"class"``, dense features of shape
-                ``(B, D, H, W)`` for ``"feature"``, or a ``(features, logits)``
-                tuple for ``"both"``.
+                ``(B, D, H, W)`` for ``"feature"``, a ``(features, logits)``
+                tuple for ``"both"``, or a ``(deep_features, logits)`` tuple of
+                the deepest encoder block features ``(B, d_s32, H/32, W/32)``
+                with full-resolution logits for ``"deep"``.
 
         Raises:
             ValueError: If ``mode`` is not one of the supported modes.
         """
-        features, logits = self.head(self.backbone(x))
+        backbone_features = self.backbone(x)
+        features, logits = self.head(backbone_features)
         if mode == "class":
             return logits
         if mode == "feature":
             return features
         if mode == "both":
             return features, logits
+        if mode == "deep":
+            return backbone_features["S32"], logits
         raise ValueError(
-            f"Unknown mode {mode!r}; expected 'class', 'feature' or 'both'"
+            f"Unknown mode {mode!r}; expected 'class', 'feature', 'both' or 'deep'"
         )
 
     def freeze_backbone(self) -> None:

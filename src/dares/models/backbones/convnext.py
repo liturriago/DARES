@@ -84,6 +84,11 @@ class ConvNeXtEncoder(Encoder):
                 return module
         raise RuntimeError("No Conv2d found in the ConvNeXt stem")
 
+    @property
+    def reference_params(self) -> list[nn.Parameter]:
+        """Deepest shared ConvNeXt stage (last block stage) parameters."""
+        return list(self.model.features[-1].parameters())
+
     def forward(self, x: torch.Tensor) -> "OrderedDict[str, torch.Tensor]":
         out: "OrderedDict[str, torch.Tensor]" = OrderedDict(
             [("S2", self.s2_stem(x).contiguous())]

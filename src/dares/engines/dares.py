@@ -1,16 +1,18 @@
-"""DARES training engine: source cross-entropy plus alpha-Renyi alignment.
+"""DARES training engine: source cross-entropy plus hardened SegCREDA alignment.
 
 The DARES objective combines the supervised segmentation loss on the source
-domain with the class-conditional Renyi mutual-information alignment on
-unlabeled target batches:
+domain with the class-conditional Renyi-2 alignment on unlabeled target
+batches. This engine uses the hardened ``SegCREDALoss`` (``Docs/SegCREDA.py``),
+which adds anti-collapse entropy floors, inter-class target repulsion and a
+per-step GradNorm-lite trust region on the reference (deepest encoder block)
+parameters.
 
-``L_DARES = L_CE(D_s) - lambda * sum_c I2tilde(Ks_c; Ktilde_t_c)``
+``L = L_seg + lambda_eff * (L_align + beta * L_ac + gamma * L_rep)``
 
-The alignment term is *subtracted* because the mutual-information estimator is
-maximized during training (Eq. 5 of the paper).
+where ``lambda_eff`` is scheduled per-step by :meth:`SegCREDALoss.update_lambda`
+(warm-up -> sigmoid ramp -> gradient-ratio cap) instead of by epoch.
 """
 
-import math
 import time
 from typing import Any
 
@@ -20,13 +22,12 @@ from torch.amp import autocast
 from tqdm import tqdm
 
 from dares.config import TrainConfig
-from dares.losses.ce import SegCrossEntropyLoss
-from dares.losses.renyi import RenyiLoss
+from dares.losses.segcreda import SegCREDALoss
 from dares.training.base_trainer import BaseTrainer
 
 
 class DARESTrainer(BaseTrainer):
-    """Unsupervised domain adaptation via class-conditional Renyi alignment.
+    """Unsupervised domain adaptation via hardened class-conditional alignment.
 
     Parameters
     ----------
@@ -44,10 +45,11 @@ class DARESTrainer(BaseTrainer):
 
     Attributes
     ----------
-    criterion : SegCrossEntropyLoss
-        Pixel-wise cross-entropy over the labeled source batches.
-    renyi_loss : RenyiLoss
-        Class-conditional alpha-Renyi alignment over the target batches.
+    criterion : SegCREDALoss
+        The hardened class-conditional Renyi-2 alignment loss (SegCREDA).
+    ref_params : list[torch.Tensor]
+        Reference parameters for the trust-region gradient balancing (the
+        deepest shared encoder block).
     optimizer : torch.optim.Adam
         Adam optimizer over the model parameters.
     """
@@ -60,82 +62,61 @@ class DARESTrainer(BaseTrainer):
         config: TrainConfig,
         device: torch.device,
     ) -> None:
-        """Initializes the trainer, the losses and the optimizer."""
+        """Initializes the SegCREDA criterion, reference params and optimizer."""
         super().__init__(model, source_loaders, target_loaders, config, device)
-        self.criterion = SegCrossEntropyLoss()
-        self.renyi_loss = RenyiLoss(
-            self.num_classes,
-            tau=config.tau,
-            n_max=config.n_max,
-            sigma=config.sigma,
-            alpha=config.alpha,
-            grid_size=config.grid_size,
+        self.criterion = SegCREDALoss(
+            num_classes=self.num_classes,
+            quota=config.quota,
+            min_samples=config.min_samples,
+            lambda_max=config.lambda_max,
+            beta=config.beta,
+            gamma=config.gamma,
+            eta_floor=config.eta_floor,
+            entropy_gap=config.entropy_gap,
+            repulsion_margin=config.repulsion_margin,
+            warmup_steps=config.warmup_steps,
+            ramp_steps=config.ramp_steps,
+            ramp_delta=config.ramp_delta,
+            grad_ratio=config.grad_ratio,
+            ema_decay=config.ema_decay,
         )
+        self.ref_params = list(self.model.backbone.reference_params)
         self.optimizer = self._make_optimizer(self.model.parameters())
-        self._epoch_idx = 0
-
-    def _alignment_weight(self, epoch_idx: int) -> float:
-        """Computes the active alignment weight for a given epoch.
-
-        Follows the CREDA dynamic schedule (Eq. 29 of the CREDA paper):
-
-        ``lambda(p) = lambda_max * tanh(delta * p / 2)``
-
-        with ``p = (epoch_idx + 1) / epochs`` the relative training progress.
-        The logistic ramp lets the alignment term grow smoothly from ``0``
-        instead of jumping in at full strength, which protects the early
-        epochs (where target pseudo-labels are noisy) while still making the
-        full ``lambda_renyi`` available in the second half of training. During
-        the warmup phase (``epoch_idx < warmup_epochs``) the weight is ``0.0``
-        and when ``schedule_delta <= 0`` the ramp is disabled (constant
-        ``lambda_renyi``).
-
-        Args:
-            epoch_idx (int): Zero-based index of the current epoch.
-
-        Returns:
-            float: The active alignment weight for the epoch.
-        """
-        if (
-            self.config.warmup_epochs is not None
-            and epoch_idx < self.config.warmup_epochs
-        ):
-            return 0.0
-        delta = float(self.config.schedule_delta)
-        if delta <= 0.0:
-            return float(self.config.lambda_renyi)
-        progress = (epoch_idx + 1) / max(int(self.config.epochs), 1)
-        factor = math.tanh(0.5 * delta * progress)
-        return float(self.config.lambda_renyi) * factor
 
     def train_epoch(self) -> dict[str, float]:
         """Runs one epoch of DARES training.
 
-        Pairs source and target batches with ``_dual_iterators`` and for each
-        pair computes the source cross-entropy plus the class-conditional
-        Renyi alignment. The mutual-information term is maximized by
-        minimizing ``L_CE - lambda * I2tilde``; the alignment weight follows
-        the CREDA dynamic ramp (see :meth:`_alignment_weight`) and is ``0.0``
-        during the warmup phase (``epoch_idx < warmup_epochs``).
+        Pairs source and target batches with ``_dual_iterators``. For each pair
+        computes the SegCREDA alignment over the deepest encoder features and
+        calls :meth:`update_lambda` (after forward, before backward) so the
+        alignment weight follows the per-step trust region.
 
         Returns
         -------
         dict[str, float]
-            ``{"loss_total", "loss_ce", "loss_renyi", "lambda_active",
-            "valid_classes", "epoch_time"}``; the loss keys are epoch averages
-            and ``epoch_time`` is the wall-clock duration in seconds.
+            ``{"loss_total", "loss_seg", "loss_align", "loss_anti_collapse",
+            "loss_repulsion", "h2_source_mean", "h2_target_mean",
+            "lambda_eff", "n_valid_classes", "n_rep_pairs", "epoch_time"}``;
+            the loss / diagnostic keys are epoch averages and ``epoch_time`` is
+            the wall-clock duration in seconds.
         """
         self.model.train()
         src_iter, tgt_iter, num_batches = self._dual_iterators(
             self.source_loaders["train"], self.target_loaders["train"]
         )
 
-        lambda_active = self._alignment_weight(self._epoch_idx)
-
-        total_loss = 0.0
-        ce_loss = 0.0
-        renyi_loss = 0.0
-        valid_classes = 0
+        acc: dict[str, float] = {
+            "loss_total": 0.0,
+            "loss_seg": 0.0,
+            "loss_align": 0.0,
+            "loss_anti_collapse": 0.0,
+            "loss_repulsion": 0.0,
+            "h2_source_mean": 0.0,
+            "h2_target_mean": 0.0,
+            "lambda_eff": 0.0,
+            "n_valid_classes": 0.0,
+            "n_rep_pairs": 0.0,
+        }
         start_time = time.time()
 
         pbar = tqdm(
@@ -153,39 +134,39 @@ class DARESTrainer(BaseTrainer):
             with autocast(
                 device_type=self.device.type, enabled=self.use_amp
             ):
-                feats_s, logits_s = self.model(imgs_s, mode="both")
-                feats_t, logits_t = self.model(imgs_t, mode="both")
-                loss_ce = self.criterion(logits_s, masks_s)
-
-            # The Renyi alignment is computed outside autocast (and internally
-            # in float32): the Gram-matrix trace normalizations are precision
-            # sensitive and must not run in float16.
-            with autocast(device_type=self.device.type, enabled=False):
-                alignment, rmetrics = self.renyi_loss(
-                    feats_s, masks_s, feats_t, logits_t
+                # Deep (bottleneck) features for alignment, full-res logits for
+                # the supervised loss and pseudo-label confidence weighting.
+                feats_s, logits_s = self.model(imgs_s, mode="deep")
+                feats_t, logits_t = self.model(imgs_t, mode="deep")
+                total, parts = self.criterion(
+                    feats_s, logits_s, masks_s, feats_t, logits_t
                 )
-            total = loss_ce - lambda_active * alignment
+
+            # Trust-region lambda update: strictly after forward, before
+            # backward (keeps the graph via retain_graph=True).
+            self.criterion.update_lambda(
+                parts["loss_seg"], parts["loss_aux"], self.ref_params
+            )
+
+            # Backprop, AMP guard / clip and optimizer step (base trainer).
+            super()._backward_step(total, self.optimizer)
+            self.optimizer.zero_grad(set_to_none=True)
             pbar.set_postfix(loss=f"{total.item():.4f}")
 
-            self.scaler.scale(total).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.optimizer.zero_grad(set_to_none=True)
+            acc["loss_total"] += float(total.detach().cpu().item())
+            acc["loss_seg"] += float(parts["loss_seg"].detach().cpu().item())
+            acc["loss_align"] += float(parts["loss_align"].detach().cpu().item())
+            acc["loss_anti_collapse"] += float(parts["loss_anti_collapse"].detach().cpu().item())
+            rep = parts["loss_repulsion"].detach().cpu().item()
+            acc["loss_repulsion"] += 0.0 if rep != rep else rep  # skip NaN
+            acc["h2_source_mean"] += float(parts["h2_source_mean"].detach().cpu().item())
+            acc["h2_target_mean"] += float(parts["h2_target_mean"].detach().cpu().item())
+            acc["lambda_eff"] += float(parts["lambda_eff"].detach().cpu().item())
+            acc["n_valid_classes"] += float(parts["n_valid_classes"].detach().cpu().item())
+            acc["n_rep_pairs"] += float(parts["n_rep_pairs"].detach().cpu().item())
 
-            total_loss += float(total.detach().cpu().item())
-            ce_loss += float(loss_ce.detach().cpu().item())
-            renyi_loss += float(alignment.detach().cpu().item())
-            valid_classes += int(rmetrics["valid_classes"])
-
-        self._epoch_idx += 1
         epoch_time = time.time() - start_time
-
-        num_batches = max(num_batches, 1)
-        return {
-            "loss_total": float(total_loss / num_batches),
-            "loss_ce": float(ce_loss / num_batches),
-            "loss_renyi": float(renyi_loss / num_batches),
-            "lambda_active": float(lambda_active),
-            "valid_classes": float(valid_classes / num_batches),
-            "epoch_time": float(epoch_time),
-        }
+        denom = max(num_batches, 1)
+        out = {k: v / denom for k, v in acc.items()}
+        out["epoch_time"] = epoch_time
+        return out

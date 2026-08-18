@@ -38,6 +38,11 @@ class ResNet50Encoder(Encoder):
         self.model = resnet50(weights=weights)
         self.model.conv1 = adapt_first_conv(self.model.conv1, in_channels)
 
+    @property
+    def reference_params(self) -> list[nn.Parameter]:
+        """Deepest shared ResNet block (``layer4``) parameters."""
+        return list(self.model.layer4.parameters())
+
     def forward(self, x: torch.Tensor) -> "OrderedDict[str, torch.Tensor]":
         x = self.model.conv1(x)
         x = self.model.bn1(x)

@@ -83,6 +83,11 @@ class SwinEncoder(Encoder):
         patch_embed[0] = adapt_first_conv(conv, in_channels)
         self.s2_stem = _make_stride2_stem(in_channels, widths[0], activation="gelu")
 
+    @property
+    def reference_params(self) -> list[nn.Parameter]:
+        """Deepest shared Swin stage (last block stage) parameters."""
+        return list(self.model.features[-1].parameters())
+
     def forward(self, x: torch.Tensor) -> "OrderedDict[str, torch.Tensor]":
         out: "OrderedDict[str, torch.Tensor]" = OrderedDict(
             [("S2", self.s2_stem(x).contiguous())]

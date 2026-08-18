@@ -12,8 +12,10 @@ Method-specific losses live in sibling modules:
 * ``advent``  ->  entropy minimization loss (ADVENT engine).
 * ``cycada``  ->  pixel generators, PatchGAN discriminator and cycle losses.
 * ``cbst``  ->  class-balanced pseudo-label selection / self-training loss.
-* ``renyi``  ->  the DARES alpha-Renyi alignment loss (sampling operator
+* ``renyi``  ->  the base DARES alpha-Renyi alignment loss (sampling operator
   ``Phi_c`` and matrix-based mutual information).
+* ``segcreda``  ->  the hardened SegCREDA alignment (anti-collapse entropy
+  floors, inter-class target repulsion and a GradNorm-lite trust region).
 """
 from dares.losses.ce import SegCrossEntropyLoss
 

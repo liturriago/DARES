@@ -59,6 +59,17 @@ class Encoder(nn.Module, ABC):
         """
         raise NotImplementedError
 
+    @property
+    def reference_params(self) -> list[nn.Parameter]:
+        """Parameters of the deepest shared encoder block.
+
+        Used by the SegCREDA trust-region gradient balancing to anchor the
+        auxiliary alignment gradient to the segmentation gradient (GradNorm-lite,
+        see ``Docs/KimiReport.txt`` Section 4b). Concrete encoders override it to
+        return the last stage / bottleneck block (e.g. ``layer4`` of a ResNet).
+        """
+        return list(self.parameters())
+
 
 def adapt_first_conv(conv: nn.Conv2d, in_channels: int) -> nn.Conv2d:
     """Adapts a 3-channel pretrained convolution to ``in_channels``.

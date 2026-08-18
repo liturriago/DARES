@@ -1,4 +1,4 @@
-"""Tests for the DARES (alpha-Renyi alignment) training engine."""
+"""Tests for the DARES (SegCREDA hardened alignment) training engine."""
 
 import math
 from pathlib import Path
@@ -12,7 +12,22 @@ import torch.nn as nn
 from dares.config import DataConfig, ModelConfig, TrainConfig
 from dares.data import DARESDataLoader
 from dares.engines.dares import DARESTrainer
+from dares.losses.segcreda import SegCREDALoss
 from dares.models.segmentation import build_model
+
+METRIC_KEYS = {
+    "loss_total",
+    "loss_seg",
+    "loss_align",
+    "loss_anti_collapse",
+    "loss_repulsion",
+    "h2_source_mean",
+    "h2_target_mean",
+    "lambda_eff",
+    "n_valid_classes",
+    "n_rep_pairs",
+    "epoch_time",
+}
 
 
 def make_h5(path: Path, n: int = 8, h: int = 64, w: int = 64) -> None:
@@ -65,14 +80,11 @@ def _build_fixtures(tmp_path: Path, **train_overrides):
         "method": "dares",
         "epochs": 1,
         "lr": 1e-4,
-        "lambda_renyi": 0.1,
-        "tau": 0.85,
-        "n_max": 1024,
-        "sigma": "auto",
-        "alpha": 2,
         "device": "cpu",
         "use_amp": False,
         "seed": 42,
+        "warmup_steps": 0,  # alignment active from the first step in tests
+        "ramp_steps": 10,
     }
     config_kwargs.update(train_overrides)
     config = TrainConfig(**config_kwargs)
@@ -87,118 +99,136 @@ def _build_fixtures(tmp_path: Path, **train_overrides):
 
 
 def test_fit_returns_model_and_tracks_history(tmp_path):
-    """fit() returns the model and records the DARES loss history."""
+    """fit() returns the model and records the SegCREDA loss history."""
     model, source_loaders, target_loaders, config, device = _build_fixtures(
         tmp_path
     )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
-    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     trained = engine.fit()
 
     assert isinstance(trained, nn.Module)
     assert trained is engine.model
     assert engine.best_miou > 0.0
-    for key in ("loss_total", "loss_ce", "loss_renyi"):
+    for key in ("loss_total", "loss_seg", "loss_align", "loss_anti_collapse"):
         assert key in engine.history
         assert len(engine.history[key]) == 1
         assert math.isfinite(engine.history[key][0])
 
 
-def test_train_epoch_returns_finite_metrics(tmp_path):
-    """train_epoch() returns finite scalars including epoch_time."""
+def test_train_epoch_returns_all_diagnostics(tmp_path):
+    """train_epoch() returns the full SegCREDA diagnostic set + epoch_time."""
     model, source_loaders, target_loaders, config, device = _build_fixtures(
         tmp_path
     )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
-    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     metrics = engine.train_epoch()
 
-    assert set(metrics) == {
-        "loss_total",
-        "loss_ce",
-        "loss_renyi",
-        "lambda_active",
-        "valid_classes",
-        "epoch_time",
-    }
-    for value in metrics.values():
-        assert math.isfinite(value)
+    assert set(metrics) == METRIC_KEYS
+    for key, value in metrics.items():
+        if key != "loss_repulsion":
+            assert math.isfinite(value), key
     assert metrics["epoch_time"] >= 0.0
-    assert metrics["lambda_active"] == pytest.approx(0.1)
 
 
-def test_warmup_disables_alignment(tmp_path):
-    """During warmup epochs the active alignment weight is zero."""
+def test_reference_params_are_the_deep_encoder_block(tmp_path):
+    """The engine uses the deepest shared encoder block as reference params."""
     model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path, warmup_epochs=5
+        tmp_path
     )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
-    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
-    metrics = engine.train_epoch()
-
-    assert metrics["lambda_active"] == 0.0
-
-
-def test_grid_size_is_forwarded_to_renyi_loss(tmp_path):
-    """The config grid_size reaches the RenyiLoss sampling operator."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path, grid_size=16
-    )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
+    expected = engine.model.backbone.reference_params
+    assert len(engine.ref_params) > 0
+    assert all(
+        any(r is e for e in expected) for r in engine.ref_params
     )
 
-    assert engine.renyi_loss.grid_size == 16
+
+def test_update_lambda_warmup_zeroes_effective_lambda():
+    """Before warmup_steps, lambda_eff stays 0 and step advances."""
+    crit = SegCREDALoss(num_classes=2, warmup_steps=5)
+    params = [
+        torch.nn.Parameter(torch.randn(4, 4)),
+        torch.nn.Parameter(torch.randn(4)),
+    ]
+    loss_seg = torch.randn((), requires_grad=True)
+    loss_aux = torch.randn((), requires_grad=True)
+
+    lam = crit.update_lambda(loss_seg, loss_aux, params)
+
+    assert lam == 0.0
+    assert crit.lambda_eff.item() == 0.0
+    assert crit.step.item() == 1
 
 
-def test_lambda_ramp_grows_with_training_progress(tmp_path):
-    """The CREDA ramp monotonically grows lambda toward lambda_renyi."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path, epochs=4, schedule_delta=8, warmup_epochs=None
-    )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
-    )
+def test_update_lambda_grows_after_warmup():
+    """After warmup, lambda_eff rises with the sigmoid ramp (nonzero)."""
+    crit = SegCREDALoss(num_classes=2, warmup_steps=0, ramp_steps=10)
+    p = torch.nn.Parameter(torch.randn(4, 4))
 
-    lambdas = [engine.train_epoch()["lambda_active"] for _ in range(4)]
+    loss_seg = (p * 1.0).sum()
+    loss_aux = (p * 0.5).sum()
 
-    assert lambdas[0] < config.lambda_renyi
-    assert lambdas[-1] == pytest.approx(config.lambda_renyi, abs=1e-3)
-    assert all(a <= b for a, b in zip(lambdas, lambdas[1:]))
+    crit.step.fill_(5)  # inside ramp (p = 5/10)
+    lam = crit.update_lambda(loss_seg, loss_aux, [p])
 
-
-def test_schedule_delta_zero_keeps_constant_lambda(tmp_path):
-    """schedule_delta=0 disables the ramp and fixes lambda at lambda_renyi."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path, epochs=3, schedule_delta=0
-    )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
-    )
-
-    lambdas = [engine.train_epoch()["lambda_active"] for _ in range(3)]
-
-    assert lambdas == [config.lambda_renyi] * 3
+    assert lam > 0.0
+    assert lam <= crit.lambda_max
+    assert crit.lambda_eff.item() == pytest.approx(lam, abs=1e-5)
 
 
-def test_lambda_ramp_respects_warmup(tmp_path):
-    """Alignment stays off during warmup and ramps in afterwards."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path, epochs=4, warmup_epochs=2
-    )
-    engine = DARESTrainer(
-        model, source_loaders, target_loaders, config, device
-    )
+def test_segcreda_forward_backward_finite():
+    """A single SegCREDA forward + update_lambda + backward is finite."""
+    torch.manual_seed(0)
+    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    fs = torch.randn(2, 8, 8, 8, requires_grad=True)
+    ft = torch.randn(2, 8, 8, 8, requires_grad=True)
+    ls = torch.randint(0, 2, (2, 8, 8))
+    logits_s = torch.randn(2, 2, 8, 8, requires_grad=True)
+    lt = torch.randn(2, 2, 8, 8)
 
-    lambdas = [engine.train_epoch()["lambda_active"] for _ in range(4)]
+    total, parts = crit(fs, logits_s, ls, ft, lt)
+    total.backward()
 
-    assert lambdas[0] == 0.0
-    assert lambdas[1] == 0.0
-    assert lambdas[2] > 0.0
-    assert lambdas[3] > 0.0
+    assert torch.isfinite(total)
+    assert parts["loss_seg"].requires_grad
+    assert parts["loss_aux"].requires_grad
+    assert fs.grad is not None
+    assert logits_s.grad is not None
+    assert bool(torch.isfinite(fs.grad).all())
+
+
+def test_segcreda_asymmetric_anchor_source_grad_zero():
+    """Source features receive no alignment gradient (asymmetric anchoring)."""
+    torch.manual_seed(1)
+    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    fs = torch.randn(2, 8, 8, 8, requires_grad=True)
+    ft = torch.randn(2, 8, 8, 8, requires_grad=True)
+    ls = torch.randint(0, 2, (2, 8, 8))
+    logits_s = torch.randn(2, 2, 8, 8)
+    lt = torch.randn(2, 2, 8, 8)
+
+    _, parts = crit(fs, logits_s, ls, ft, lt)
+    parts["loss_aux"].backward()
+
+    assert fs.grad is not None
+    assert torch.all(fs.grad == 0)
+
+
+def test_segcreda_amp_safe_under_autocast():
+    """Runs the loss under torch.autocast without dtype errors."""
+    torch.manual_seed(2)
+    crit = SegCREDALoss(num_classes=2, warmup_steps=0)
+    fs = torch.randn(2, 8, 8, 8)
+    ft = torch.randn(2, 8, 8, 8)
+    ls = torch.randint(0, 2, (2, 8, 8))
+    logits_s = torch.randn(2, 2, 8, 8)
+    lt = torch.randn(2, 2, 8, 8)
+
+    with torch.autocast(device_type="cpu", enabled=True):
+        total, parts = crit(fs, logits_s, ls, ft, lt)
+
+    assert torch.isfinite(total)
+    assert total.dtype == torch.float32
