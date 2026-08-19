@@ -5,30 +5,29 @@
 
 \begin{document}
 \begin{tikzpicture}
-    % Color palette for publication
-    \definecolor{sourcecolor}{RGB}{31, 78, 121}   % Deep Navy Blue
-    \definecolor{targetcolor}{RGB}{192, 0, 0}     % Academic Crimson Red
-    \definecolor{cbstcolor}{RGB}{180, 85, 0}      % Amber / Rust
-    \definecolor{adventcolor}{RGB}{110, 60, 140}  % Purple / Slate
-    \definecolor{darescolor}{RGB}{34, 139, 34}    % Forest Green (Ours)
+    % Academic Color Palette
+    \definecolor{nonforestcolor}{RGB}{202, 120, 52}  % Earth/Soil (Non-Forest)
+    \definecolor{forestcolor}{RGB}{42, 138, 60}      % Canopy/Forest (Amazon)
+    \definecolor{accentline}{RGB}{25, 95, 40}
 
     \begin{axis}[
-        ybar=4pt,
-        bar width=15pt,
-        width=14.5cm,
-        height=8.8cm,
+        ybar=3.5pt,
+        bar width=13pt,
+        width=14.8cm,
+        height=9.2cm,
         ymin=0,
-        ymax=120,
-        enlarge x limits=0.15,
-        ylabel={\textbf{Mean DICE Score (\%) [$\uparrow$]}},
+        ymax=102,
+        ytick={0, 20, 40, 60, 80, 100},
+        enlarge x limits=0.18,
+        ylabel={\textbf{Target DICE Score (\%) [$\uparrow$]}},
         ylabel style={font=\small},
         symbolic x coords={Source-Only, CBST, ADVENT, DARES},
         xtick=data,
-        xticklabels={Source-Only, CBST, ADVENT, {DARES (Ours)}},
-        x tick label style={font=\small\bfseries, yshift=-2pt},
+        xticklabels={Source-Only, CBST, ADVENT, {\textbf{DARES (Ours)}}},
+        x tick label style={font=\small, yshift=-3pt},
         ymajorgrids=true,
-        grid style={dashed, gray!30},
-        % Formato estricto a 2 decimales
+        grid style={dashed, gray!25},
+        % Formato exacto a 2 decimales encima de cada barra
         nodes near coords,
         every node near coord/.append style={
             font=\footnotesize\bfseries,
@@ -37,84 +36,67 @@
             /pgf/number format/precision=2,
             /pgf/number format/fixed zerofill
         },
-        % Leyenda desacoplada del título
+        % Leyenda superior desacoplada
         legend style={
-            at={(0.5, 1.03)},
+            at={(0.5, 1.04)},
             anchor=south,
             legend columns=2,
             font=\small,
-            draw=gray!50,
+            draw=gray!40,
             fill=white,
+            rounded corners=2pt,
             /tikz/every even column/.append style={column sep=0.8cm}
         },
         title style={font=\bfseries, at={(0.5, 1.15)}, anchor=south},
-        title={Cross-Domain Deforestation Segmentation: Source vs. Target DICE Degradation}
+        title={Target Domain (Colombia) Performance: Non-Forest vs. Forest Class DICE}
     ]
 
-        % 1. SOURCE TEST (In-Domain Reference)
+        % 1. TARGET: NON-FOREST (Soil / Deforestation)
         \addplot[
-            fill=sourcecolor,
-            draw=black!80,
-            postaction={pattern=north east lines, pattern color=white!40}
+            fill=nonforestcolor!85,
+            draw=black!75,
+            postaction={pattern=north east lines, pattern color=white!35}
         ] coordinates {
-            (Source-Only, 93.76)
-            (CBST, 91.71)
-            (ADVENT, 88.14)
-            (DARES, 90.80)
+            (Source-Only, 58.20)
+            (CBST, 71.30)
+            (ADVENT, 73.82)
+            (DARES, 77.08)
         };
-        \addlegendentry{Source Test (In-Domain: Brazil)}
+        \addlegendentry{Non-Forest (Soil / Deforestation)}
 
-        % 2. TARGET TEST (Cross-Domain Covariate Shift)
+        % 2. TARGET: FOREST (Amazonian Canopy)
         \addplot[
-            fill=targetcolor,
-            draw=black!80
+            fill=forestcolor!85,
+            draw=black!75
         ] coordinates {
-            (Source-Only, 35.64)
-            (CBST, 64.40)
-            (ADVENT, 68.16)
-            (DARES, 72.45)
+            (Source-Only, 13.08)
+            (CBST, 57.50)
+            (ADVENT, 62.50)
+            (DARES, 67.49)
         };
-        \addlegendentry{Target Test (Shifted: Colombia LIME-Med)}
+        \addlegendentry{Forest (Amazon Canopy)}
 
         % -------------------------------------------------------------
-        % 1. SOURCE-ONLY DELTA (Gap: 93.76 -> 35.64 = -58.12%)
+        % 1. TARJETA RESUMEN DE DARES (Cuadrante superior izquierdo)
         % -------------------------------------------------------------
-        \draw[dashed, gray!60, line width=0.5pt] 
-            ([xshift=-9.5pt]axis cs:Source-Only, 93.76) -- ([xshift=18pt]axis cs:Source-Only, 93.76);
-        \draw[{Stealth[length=3.5pt]}-{Stealth[length=3.5pt]}, thick, red!85!black] 
-            ([xshift=9.5pt]axis cs:Source-Only, 42) -- ([xshift=9.5pt]axis cs:Source-Only, 91)
-            node[midway, fill=white, inner sep=1.5pt, rounded corners=2pt, draw=red!50, font=\scriptsize\bfseries, text=red!85!black] 
-            {$\Delta = -58.12\%$};
+        \node[anchor=north west, fill=white, draw=accentline!60, line width=0.6pt, rounded corners=3pt, inner sep=4pt]
+            at (axis cs:Source-Only, 98) {
+                \begin{tabular}{@{}l@{}}
+                    \textcolor{accentline!95!black}{\footnotesize\textbf{DARES Overall Mean DICE: 72.28\%}} \\
+                    \scriptsize\textcolor{gray!85!black}{($+4.12\%$ vs. ADVENT $\;\mid\;$ $+7.88\%$ vs. CBST)}
+                \end{tabular}
+            };
 
         % -------------------------------------------------------------
-        % 2. CBST DELTA (Gap: 91.71 -> 64.40 = -27.31%)
+        % 2. CORCHETE DE GANANCIA EN FOREST (Cuadrante superior derecho)
+        % Centros de barra Forest: xshift = +8.25pt
         % -------------------------------------------------------------
-        \draw[dashed, gray!60, line width=0.5pt] 
-            ([xshift=-9.5pt]axis cs:CBST, 91.71) -- ([xshift=18pt]axis cs:CBST, 91.71);
-        \draw[{Stealth[length=3pt]}-{Stealth[length=3pt]}, thick, cbstcolor] 
-            ([xshift=9.5pt]axis cs:CBST, 70.5) -- ([xshift=9.5pt]axis cs:CBST, 89)
-            node[midway, fill=white, inner sep=1.2pt, rounded corners=2pt, draw=cbstcolor!50, font=\scriptsize\bfseries, text=cbstcolor] 
-            {$\Delta = -27.31\%$};
-
-        % -------------------------------------------------------------
-        % 3. ADVENT DELTA (Gap: 88.14 -> 68.16 = -19.98%)
-        % -------------------------------------------------------------
-        \draw[dashed, gray!60, line width=0.5pt] 
-            ([xshift=-9.5pt]axis cs:ADVENT, 88.14) -- ([xshift=18pt]axis cs:ADVENT, 88.14);
-        \draw[{Stealth[length=3pt]}-{Stealth[length=3pt]}, thick, adventcolor] 
-            ([xshift=9.5pt]axis cs:ADVENT, 74) -- ([xshift=9.5pt]axis cs:ADVENT, 85.5)
-            node[midway, fill=white, inner sep=1.2pt, rounded corners=2pt, draw=adventcolor!50, font=\scriptsize\bfseries, text=adventcolor] 
-            {$\Delta = -19.98\%$};
-
-        % -------------------------------------------------------------
-        % 4. DARES (OURS) DELTA (Gap: 90.80 -> 72.45 = -18.35%)
-        % -------------------------------------------------------------
-        \draw[dashed, gray!60, line width=0.5pt] 
-            ([xshift=-9.5pt]axis cs:DARES, 90.80) -- ([xshift=18pt]axis cs:DARES, 90.80);
-        \draw[{Stealth[length=3pt]}-{Stealth[length=3pt]}, thick, darescolor!90!black] 
-            ([xshift=9.5pt]axis cs:DARES, 78) -- ([xshift=9.5pt]axis cs:DARES, 88)
-            node[midway, fill=white, inner sep=1.2pt, rounded corners=2pt, draw=darescolor!60, font=\scriptsize\bfseries, text=darescolor!90!black] 
-            {$\Delta = -18.35\%$};
+        \draw[thick, accentline!90!black]
+            ([xshift=8.25pt]axis cs:ADVENT, 82) -- ([xshift=8.25pt]axis cs:ADVENT, 91)
+            -- ([xshift=8.25pt]axis cs:DARES, 91)
+            node[midway, above=1pt, fill=white, inner sep=2pt, draw=accentline!50, rounded corners=2pt, font=\scriptsize\bfseries, text=accentline!95!black] 
+            {$+4.99\%$ Forest Gain}
+            -- ([xshift=8.25pt]axis cs:DARES, 82);
 
     \end{axis}
 \end{tikzpicture}
