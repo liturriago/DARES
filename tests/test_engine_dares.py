@@ -304,3 +304,25 @@ def test_scaler_update_called_after_each_step(tmp_path, monkeypatch):
     # but an update is always issued after it (step <= update).
     assert calls["update"] >= 1
     assert calls["step"] <= calls["update"]
+
+
+def test_criterion_is_on_model_device(tmp_path):
+    """The DARESLoss buffers must live on the same device as the model.
+
+    Regression: the criterion was built without .to(device), so its registered
+    buffers (step / lambda_eff / ema_g_seg / ema_g_aux) stayed on CPU while the
+    model and gradients were on cuda. update_lambda's GradNorm then hit
+    'Expected all tensors to be on the same device' once step >= warmup_steps.
+    """
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    model_dev = next(model.parameters()).device
+    assert engine.criterion.step.device == model_dev
+    assert engine.criterion.lambda_eff.device == model_dev
+    assert engine.criterion.ema_g_seg.device == model_dev
+    assert engine.criterion.ema_g_aux.device == model_dev
+    # All reference params must be on the same device too.
+    assert all(p.device == model_dev for p in engine.ref_params)

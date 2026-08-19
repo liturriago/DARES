@@ -79,7 +79,7 @@ class DARESTrainer(BaseTrainer):
             ramp_delta=config.ramp_delta,
             grad_ratio=config.grad_ratio,
             ema_decay=config.ema_decay,
-        )
+        ).to(device)
         self.ref_params = list(self.model.backbone.reference_params)
         self.optimizer = self._make_optimizer(self.model.parameters())
 
