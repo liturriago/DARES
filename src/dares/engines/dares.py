@@ -150,6 +150,9 @@ class DARESTrainer(BaseTrainer):
 
             # Backprop, AMP guard / clip and optimizer step (base trainer).
             super()._backward_step(total, self.optimizer)
+            # Finalize the AMP scaler cycle for this step (the base helper
+            # steps but does not update, matching the multi-optimizer engines).
+            self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
             pbar.set_postfix(loss=f"{total.item():.4f}")
 

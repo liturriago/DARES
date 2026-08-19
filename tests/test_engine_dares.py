@@ -265,3 +265,42 @@ def test_lambda_eff_zero_during_warmup_steps(tmp_path):
 
     assert metrics["lambda_eff"] == 0.0
     assert int(engine.criterion.step.item()) > 0
+
+
+def test_scaler_update_called_after_each_step(tmp_path, monkeypatch):
+    """Each optimizer step is followed by scaler.update() (GradScaler cycle).
+
+    Regression: the engine routed through BaseTrainer._backward_step (which
+    steps but does not update) and dropped the explicit scaler.update() call.
+    On CUDA with a live GradScaler this raises 'step() has already been called
+    since the last update()' on the second batch. This test asserts the step /
+    update ordering contract by counting calls.
+    """
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    calls = {"step": 0, "update": 0}
+    orig_step = engine.scaler.step
+    orig_update = engine.scaler.update
+
+    def counting_step(optimizer):
+        calls["step"] += 1
+        return orig_step(optimizer)
+
+    def counting_update():
+        calls["update"] += 1
+        return orig_update()
+
+    monkeypatch.setattr(engine.scaler, "step", counting_step)
+    monkeypatch.setattr(engine.scaler, "update", counting_update)
+
+    metrics = engine.train_epoch()
+
+    batches = int(metrics["epoch_time"] >= 0.0)  # at least one batch ran
+    assert calls["step"] >= 1
+    # update() must run at least once; a step may be skipped by the NaN guard
+    # but an update is always issued after it (step <= update).
+    assert calls["update"] >= 1
+    assert calls["step"] <= calls["update"]
