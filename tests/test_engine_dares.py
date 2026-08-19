@@ -326,3 +326,43 @@ def test_criterion_is_on_model_device(tmp_path):
     assert engine.criterion.ema_g_aux.device == model_dev
     # All reference params must be on the same device too.
     assert all(p.device == model_dev for p in engine.ref_params)
+
+
+def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
+    """If the NaN guard skips the optimizer step, scaler.update() must not run.
+
+    Regression: the engine called scaler.update() unconditionally after
+    _backward_step. When gradients were non-finite (guard returns False) the
+    step was skipped, no inf check was recorded by the scaler, and update()
+    asserted 'No inf checks were recorded prior to update.'.
+
+    The engine now finalizes the AMP cycle only after a real step.
+    """
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    update_calls = []
+    orig_update = engine.scaler.update
+
+    def counting_update():
+        update_calls.append(1)
+        return orig_update()
+
+    monkeypatch.setattr(engine.scaler, "update", counting_update)
+
+    # Force a NaN loss on the first batch so the gradient guard trips and the
+    # optimizer step is skipped.
+    original_forward = engine.criterion.forward
+
+    def nan_forward(*args, **kwargs):
+        total, parts = original_forward(*args, **kwargs)
+        return total * float("nan"), parts
+
+    monkeypatch.setattr(engine.criterion, "forward", nan_forward)
+
+    metrics = engine.train_epoch()  # must not raise
+
+    assert metrics["epoch_time"] >= 0.0
+    assert len(update_calls) == 0  # update() skipped alongside the skipped step

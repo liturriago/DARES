@@ -109,7 +109,7 @@ class BaseTrainer(ABC):
         loss: torch.Tensor,
         optimizer: optim.Optimizer,
         params: Any | None = None,
-    ) -> None:
+    ) -> bool:
         """Backpropagates, optionally clips, and steps an optimizer.
 
         Applies the AMP scaler to ``loss``, backpropagates, and delegates to
@@ -121,10 +121,20 @@ class BaseTrainer(ABC):
             optimizer (optim.Optimizer): Optimizer to step.
             params (Any | None): Parameters to check / clip; defaults to all
                 optimizer parameters.
+
+        Returns:
+            bool: ``True`` if the optimizer step was taken (gradients were
+                finite and the scaler recorded its inf check), ``False`` when
+                the step was skipped due to non-finite gradients. Callers that
+                finalize the AMP cycle (``scaler.update()``) should only do so
+                after a successful step, otherwise the scaler has no recorded
+                inf check and ``update()`` raises.
         """
         self.scaler.scale(loss).backward()
         if self._guard_step(optimizer, params):
             self.scaler.step(optimizer)
+            return True
+        return False
 
     def _guard_step(
         self,
