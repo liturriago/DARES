@@ -49,6 +49,9 @@ class DARESLoss(nn.Module):
         ramp_steps (int): Sigmoid ramp length (in steps) after warm-up.
         ramp_delta (float): Sigmoid steepness.
         grad_ratio (float): ``rho`` — max allowed ``||g_aux|| / ||g_seg||``.
+        trust_region (bool): Enable the GradNorm-lite trust region; when
+            ``False`` the alignment weight follows only the sigmoid ramp
+            (``lambda_eff = lambda_max * s(t)``).
         ema_decay (float): EMA decay for the gradient-norm moving averages.
         weight_cross (bool): Also weight the cross-block ``K_st`` by target
             confidence (symmetric generalization of the paper's weighting).
@@ -73,6 +76,7 @@ class DARESLoss(nn.Module):
         ramp_steps: int = 4000,
         ramp_delta: float = 10.0,
         grad_ratio: float = 0.8,
+        trust_region: bool = True,
         ema_decay: float = 0.9,
         weight_cross: bool = False,
         normalize_features: bool = False,
@@ -94,6 +98,7 @@ class DARESLoss(nn.Module):
         self.ramp_steps = int(ramp_steps)
         self.ramp_delta = float(ramp_delta)
         self.grad_ratio = float(grad_ratio)
+        self.trust_region = bool(trust_region)
         self.ema_decay = float(ema_decay)
         self.weight_cross = bool(weight_cross)
         self.normalize_features = bool(normalize_features)
@@ -339,6 +344,14 @@ class DARESLoss(nn.Module):
             self.lambda_eff.zero_()
             return 0.0
 
+        p = min(1.0, (t - self.warmup_steps) / max(1, self.ramp_steps))
+        s = (1.0 - math.exp(-self.ramp_delta * p)) / (1.0 + math.exp(-self.ramp_delta * p))
+
+        if not self.trust_region:
+            lam = float(self.lambda_max * s)
+            self.lambda_eff.fill_(lam)
+            return lam
+
         ref = [r for r in ref_params if r.requires_grad]
 
         def safe_grad(loss):
@@ -364,8 +377,6 @@ class DARESLoss(nn.Module):
         self.ema_g_aux.mul_(d).add_((1.0 - d) * na)
 
         ratio = (self.grad_ratio * self.ema_g_seg / (self.ema_g_aux + self.eps)).clamp(max=1.0)
-        p = min(1.0, (t - self.warmup_steps) / max(1, self.ramp_steps))
-        s = (1.0 - math.exp(-self.ramp_delta * p)) / (1.0 + math.exp(-self.ramp_delta * p))
         lam = float(self.lambda_max * s * ratio.item())
         self.lambda_eff.fill_(lam)
         return lam

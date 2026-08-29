@@ -109,35 +109,21 @@ class TrainConfig(BaseModel):
         lr (float): Learning rate for the optimizer.
         weight_decay (float): Weight decay for the optimizer.
         gamma (float): Exponential learning rate decay factor.
-        lr_schedule (bool): Enable the dynamic CREDA learning rate schedule
+        lr_schedule (bool): Enable the dynamic DARES learning rate schedule
             (eta(p) = eta0 * (1 + alpha*p)^(-beta)).
         schedule_alpha (float): alpha hyperparameter of the LR schedule.
         schedule_beta (float): beta hyperparameter of the LR schedule.
-        schedule_delta (float): delta hyperparameter of the CREDA alignment
-            weight ramp (Eq. 29 of the paper), ``lambda(p) = lambda_max *
-            tanh(delta * p / 2)`` with ``p = (epoch + 1) / epochs``; set to
-            ``0`` to disable the ramp and use a constant ``lambda_renyi``.
         use_amp (bool): Whether to use Automatic Mixed Precision.
         device (Literal): Computing device (cpu, cuda, mps).
         seed (int): Random seed for reproducibility.
-        lambda_renyi (float): Weight of the DARES alpha-Renyi alignment term
-            (used as the plateau value ``lambda_max`` of the ramp).
-        tau (float): Pseudo-label confidence threshold for the sampling operator.
-        n_max (int): Maximum number of samples per class per mini-batch (N_max).
-        sigma (float | Literal["auto"]): Kernel bandwidth; "auto" uses the
-            median heuristic.
-        alpha (int): Order of the Renyi entropy (alpha = 2).
-        grid_size (int): Number of spatial cells per side used by the
-            stratified sampling operator ``Phi_c`` (reduced automatically to a
-            divisor of the input spatial size).
-        warmup_epochs (int | None): Epochs with alignment disabled (lambda_renyi = 0).
+        warmup_epochs (int | None): Epochs with alignment disabled.
             Kept for backward compatibility with the epoch-based schedule; the
             DARESLoss engine ignores it in favor of its per-step ``warmup_steps``.
         quota (int): DARESLoss per-class pixel sampling quota (M).
         min_samples (int): DARESLoss minimum pixels per class (tau) to include a class.
         lambda_max (float): DARESLoss peak alignment weight.
         beta (float): DARESLoss weight of the anti-collapse term.
-        gamma (float): DARESLoss weight of the inter-class repulsion term.
+        repulsion_gamma (float): DARESLoss weight of the inter-class repulsion term.
         eta_floor (float): DARESLoss absolute H2 (bits) floor for source classes.
         entropy_gap (float): DARESLoss target-vs-source entropy gap (bits).
         repulsion_margin (float): DARESLoss margin m (bits) of the repulsion hinge.
@@ -145,7 +131,25 @@ class TrainConfig(BaseModel):
         ramp_steps (int): DARESLoss sigmoid ramp length (steps) after warm-up.
         ramp_delta (float): DARESLoss sigmoid steepness.
         grad_ratio (float): DARESLoss grad-norm cap rho (max ||g_aux||/||g_seg||).
+        trust_region (bool): DARESLoss enable the GradNorm-lite trust region
+            (gradient-ratio cap). When ``False`` the alignment weight follows
+            only the sigmoid ramp (``lambda_eff = lambda_max * s(t)``).
         ema_decay (float): DARESLoss EMA decay for gradient norms.
+        method (Literal): UDA method driving ``build_engine`` (``"source_only"``,
+            ``"advent"``, ``"dacs"``, ``"fda"`` or ``"dares"``).
+        lambda_adv (float): ADVENT adversarial alignment weight.
+        lambda_entropy (float): ADVENT entropy minimization weight.
+        dacs_threshold (float): DACS pseudo-label confidence threshold.
+        dacs_mix_ratio (float): DACS fraction of source classes pasted in ClassMix.
+        dacs_color_jitter (bool): DACS enable color jitter (source and target).
+        dacs_brightness / dacs_contrast / dacs_saturation / dacs_hue (float):
+            DACS color-jitter magnitudes.
+        dacs_blur (bool): DACS enable Gaussian blur on the target batch.
+        dacs_blur_kernel (int): DACS Gaussian blur kernel size.
+        dacs_blur_sigma (tuple[float, float]): DACS Gaussian blur sigma range.
+        fda_beta (float): FDA spectral-swap fraction (low-frequency amplitude).
+        fda_lambda_entropy (float): FDA entropy-regularization weight.
+        fda_eta (float): FDA Charbonnier entropy exponent.
     """
     epochs: int = Field(default=45, gt=0)
     lr: float = Field(default=1e-4, gt=0)
@@ -155,27 +159,20 @@ class TrainConfig(BaseModel):
     lr_schedule: bool = True
     schedule_alpha: float = Field(default=20.0, gt=0.0)
     schedule_beta: float = Field(default=0.75, gt=0.0)
-    schedule_delta: float = Field(default=20.0, ge=0.0)
 
     use_amp: bool = True
     device: Literal["cuda", "cpu", "mps"] = "cuda"
     seed: int = 42
 
-    # DARES alignment hyperparameters
-    lambda_renyi: float = Field(default=0.1, ge=0.0)
-    tau: float = Field(default=0.85, gt=0.0, le=1.0)
-    n_max: int = Field(default=1024, gt=0)
-    sigma: float | Literal["auto"] = "auto"
-    alpha: int = Field(default=2, ge=1)
-    grid_size: int = Field(default=8, gt=0)
+    # Epoch-based warm-up (backward compatible; DARESLoss uses warmup_steps)
     warmup_epochs: int | None = None
 
-    # DARES hardening alignment hyperparameters (DARESLoss)
+    # DARES alignment hyperparameters (DARESLoss)
     quota: int = Field(default=256, gt=0)
     min_samples: int = Field(default=8, gt=0)
     lambda_max: float = Field(default=1.0, ge=0.0)
     beta: float = Field(default=1.0, ge=0.0)
-    gamma: float = Field(default=0.5, ge=0.0)
+    repulsion_gamma: float = Field(default=0.5, ge=0.0)
     eta_floor: float = Field(default=1.0, ge=0.0)
     entropy_gap: float = Field(default=0.25, ge=0.0)
     repulsion_margin: float = Field(default=0.2, ge=0.0)
@@ -183,33 +180,38 @@ class TrainConfig(BaseModel):
     ramp_steps: int = Field(default=4000, ge=1)
     ramp_delta: float = Field(default=10.0, gt=0.0)
     grad_ratio: float = Field(default=0.8, gt=0.0)
+    trust_region: bool = True
     ema_decay: float = Field(default=0.9, gt=0.0, le=1.0)
 
     # Method selection (drives build_engine)
-    method: Literal["source_only", "advent", "cycada", "cbst", "dares"] = "dares"
+    method: Literal["source_only", "advent", "dacs", "fda", "dares"] = "dares"
 
     # ADVENT / adversarial alignment
     lambda_adv: float = Field(default=0.1, ge=0.0)
     lambda_entropy: float = Field(default=0.1, ge=0.0)
 
-    # CyCADA
-    lambda_pixel: float = Field(default=1.0, ge=0.0)
-    lambda_feat: float = Field(default=1.0, ge=0.0)
-    lambda_cycle: float = Field(default=1.0, ge=0.0)
-    lambda_identity: float = Field(default=0.1, ge=0.0)
+    # DACS (cross-domain mixed sampling)
+    dacs_threshold: float = Field(default=0.968, gt=0.0, le=1.0)
+    dacs_mix_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
+    dacs_color_jitter: bool = True
+    dacs_brightness: float = Field(default=0.5, ge=0.0)
+    dacs_contrast: float = Field(default=0.5, ge=0.0)
+    dacs_saturation: float = Field(default=0.5, ge=0.0)
+    dacs_hue: float = Field(default=0.25, ge=0.0)
+    dacs_blur: bool = True
+    dacs_blur_kernel: int = Field(default=5, gt=0)
+    dacs_blur_sigma: tuple[float, float] = (0.1, 2.0)
 
-    # CBST
-    lambda_self: float = Field(default=1.0, ge=0.0)
-    pseudo_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
-    pseudo_topk_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
-    n_self_training_rounds: int = Field(default=1, gt=0)
+    # FDA (Fourier Domain Adaptation)
+    fda_beta: float = Field(default=0.09, gt=0.0, le=0.5)
+    fda_lambda_entropy: float = Field(default=0.005, ge=0.0)
+    fda_eta: float = Field(default=2.0, gt=0.0)
 
-    # Optimizer learning-rate overrides
+    # Optimizer learning-rate override (discriminator methods e.g. ADVENT)
     lr_d: float | None = Field(default=None, gt=0)
-    lr_g: float | None = Field(default=None, gt=0)
 
     # Gradient clipping (global max norm) applied to each optimizer step.
-    # Mainly stabilizes adversarial methods (ADVENT / CyCADA); None disables.
+    # Mainly stabilizes adversarial methods (ADVENT); None disables.
     grad_clip: float | None = Field(default=None, ge=0.0)
 
 

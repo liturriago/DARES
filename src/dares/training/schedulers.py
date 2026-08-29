@@ -9,8 +9,8 @@ from torch.optim.lr_scheduler import LRScheduler
 from dares.config import TrainConfig
 
 
-class CREDALRScheduler(LRScheduler):
-    """CREDA dynamic learning-rate schedule (Eq. 29 of the paper).
+class DARESScheduler(LRScheduler):
+    """DARES dynamic learning-rate schedule (Eq. 29 of the paper).
 
     ``eta(p) = eta0 * (1 + alpha * p)^(-beta)`` with ``p`` the relative
     training progress ``epoch / total_epochs``. Because the schedule is
@@ -54,14 +54,14 @@ def build_scheduler(
     Args:
         optimizer (torch.optim.Optimizer): Optimizer to schedule.
         config (TrainConfig): Training configuration; ``lr_schedule`` enables
-            the CREDA dynamic schedule, otherwise an exponential decay with
+            the DARES dynamic schedule, otherwise an exponential decay with
             ``gamma`` is used.
 
     Returns:
         LRScheduler: The configured scheduler.
     """
     if config.lr_schedule:
-        return CREDALRScheduler(
+        return DARESScheduler(
             optimizer,
             total_epochs=config.epochs,
             alpha=config.schedule_alpha,

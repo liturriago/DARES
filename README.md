@@ -9,7 +9,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 
 ## Features
 
-- **Five UDA methods** under one shared training interface: Source-Only baseline, ADVENT, CyCADA, CBST and **DARES** (the proposed α-Rényi alignment).
+- **Five UDA methods** under one shared training interface: Source-Only baseline, ADVENT, DACS, FDA and **DARES** (the proposed α-Rényi alignment).
 - **Pluggable architecture matrix:** backbones (ResNet50, ConvNeXt-Tiny, Swin-T) × segmentation heads (ResUNet decoder, DeepLabV3+ ASPP).
 - **DARES core loss (DARESLoss):** hardened class-conditional order-2 Rényi alignment over Gaussian Gram matrices with median-heuristic kernel bandwidth, per-pixel Rényi-2 confidence weighting, anti-collapse spectral entropy floors (`H2 ≥ η`), margin-hinged inter-class target repulsion, and a per-step GradNorm-lite trust region on the deepest encoder block.
 - **CREDA dynamic alignment schedule:** the Rényi weight follows the per-step sigmoid ramp `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` (CREDA Eq. 29 + GradNorm-lite EMA), so the alignment ramps in smoothly and can never dominate the supervised gradient.
@@ -24,8 +24,8 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 | --- | --- | --- |
 | `source_only` | Baseline | Supervised CE on source only (adaptation gap reference). |
 | `advent` | Adversarial | Entropy-map domain discriminator + target entropy minimization. |
-| `cycada` | Adversarial | Cycle-consistent pixel translation + feature adversarial alignment. |
-| `cbst` | Self-training | Class-balanced pseudo-label selection with masked CE. |
+| `dacs` | Self-training | Cross-domain mixed sampling (ClassMix) with pseudo-labels, color jitter and Gaussian blur. |
+| `fda` | Spectral alignment | Fourier low-frequency amplitude swap + Charbonnier entropy minimization. |
 | `dares` | Info-theoretic | `L = L_seg + λ_eff·(L_align + β·L_ac + γ·L_rep)` — hardened DARES class-conditional Rényi alignment with anti-collapse entropy floors, margin-hinged target repulsion and a per-step gradient trust region `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)`. |
 
 ## Installation
@@ -64,19 +64,27 @@ class-balance filtering, sliding-window extraction).
 
 ## Configuration
 
-Experiments are fully described by a YAML file. The matrix is organized as one folder per backbone–head pair:
+Experiments are fully described by a YAML file, organized in three folders:
 
 ```
-configs/training/
-├── resnet50_resunet/        # dares.yaml, source_only.yaml, advent.yaml, cycada.yaml, cbst.yaml
-├── resnet50_deeplabv3p/
-├── convnext_tiny_resunet/
-├── convnext_tiny_deeplabv3p/
-├── swin_t_resunet/
-└── swin_t_deeplabv3p/
+configs/
+├── LIME_stress/            # ConvNeXt-ResUNet × 5 methods × {low, medium, high} LIME tiers
+│   ├── low/
+│   ├── medium/
+│   └── high/
+├── architectures/          # source_only + dares × 5 backbone–head combos (medium)
+│   ├── resnet50_resunet/
+│   ├── resnet50_deeplabv3p/
+│   ├── convnext_tiny_deeplabv3p/
+│   ├── swin_t_resunet/
+│   └── swin_t_deeplabv3p/
+└── ablation/               # DARES with one component disabled (medium, ConvNeXt-ResUNet)
+    ├── dares_no_anti_collapse.yaml
+    ├── dares_no_repulsion.yaml
+    └── dares_no_trust_region.yaml
 ```
 
-Example (`configs/training/resnet50_resunet/dares.yaml`):
+Example (`configs/LIME_stress/medium/dares.yaml`):
 
 ```yaml
 data:
@@ -88,7 +96,7 @@ data:
   num_workers: 4
 
 model:
-  backbone: "resnet50"
+  backbone: "convnext_tiny"
   head: "resunet"
   in_channels: 4          # B2, B3, B4, B8
   num_classes: 2          # non_forest / forest
@@ -103,7 +111,7 @@ training:
   min_samples: 8        # tau — class must have >= this many pixels
   lambda_max: 1.0       # peak alignment weight
   beta: 1.0             # anti-collapse term weight
-  gamma: 0.5            # inter-class repulsion term weight
+  repulsion_gamma: 0.5  # inter-class repulsion term weight
   eta_floor: 1.0        # absolute H2 (bits) floor for source classes
   entropy_gap: 0.25     # target must stay within gap of source H2 (bits)
   repulsion_margin: 0.2 # hinge margin m (bits) for target repulsion
@@ -111,11 +119,12 @@ training:
   ramp_steps: 4000      # sigmoid ramp length (steps)
   ramp_delta: 10.0      # sigmoid steepness
   grad_ratio: 0.8       # rho — max ||g_aux||/||g_seg|| trust-region cap
+  trust_region: true    # GradNorm-lite trust region (set false to ablate)
   ema_decay: 0.9        # EMA decay for gradient norms
 
 experiment:
-  name: "resnet50_resunet_dares"
-  output_dir: "outputs/resnet50_resunet/dares/experiment_1"
+  name: "convnext_resunet_medium_dares"
+  output_dir: "outputs/LIME_stress/medium/dares/experiment_1"
 ```
 
 ## Usage
@@ -123,8 +132,8 @@ experiment:
 ### Train (any method)
 
 ```bash
-python scripts/train.py --config configs/training/resnet50_resunet/dares.yaml
-python scripts/train.py --config configs/training/resnet50_resunet/dares.yaml --device cpu
+python scripts/train.py --config configs/LIME_stress/medium/dares.yaml
+python scripts/train.py --config configs/LIME_stress/medium/dares.yaml --device cpu
 ```
 
 The script builds the loaders, model and engine, runs `fit()`, saves the best checkpoint
@@ -135,8 +144,8 @@ The script builds the loaders, model and engine, runs `fit()`, saves the best ch
 
 ```bash
 python scripts/evaluate.py \
-    --config configs/training/resnet50_resunet/dares.yaml \
-    --model outputs/resnet50_resunet/dares/experiment_1/model_final.pth
+    --config configs/LIME_stress/medium/dares.yaml \
+    --model outputs/LIME_stress/medium/dares/experiment_1/model_final.pth
 ```
 
 Saves `evaluation_metrics.json`, confusion-matrix heatmaps and a qualitative
@@ -145,7 +154,7 @@ input/ground-truth/prediction overlay.
 ### Validate the HDF5 containers
 
 ```bash
-python scripts/check_data.py --config configs/training/resnet50_resunet/dares.yaml
+python scripts/check_data.py --config configs/LIME_stress/medium/dares.yaml
 ```
 
 Reports keys, shapes, dtypes, compression, per-split forest ratio (over valid,
@@ -157,7 +166,7 @@ python scripts/check_data.py \
     --source_dir .../Source --target_dir .../Target_High --target_variant high
 ```
 
-### Stress-test variants (EXP-05…07)
+### Stress-test variants (EXP-06…08)
 
 Training a LIME degradation tier is just a different `target_dir` +
 `target_variant` in the config:
@@ -175,7 +184,7 @@ data:
 !git clone https://github.com/liturriago/DARES.git /kaggle/working/DARES
 %cd /kaggle/working/DARES
 !pip install -e .
-!python scripts/train.py --config configs/training/resnet50_resunet/dares.yaml
+!python scripts/train.py --config configs/LIME_stress/medium/dares.yaml
 ```
 
 Use a GPU accelerator (T4 is enough for `batch_size=8` at `224×224`).
@@ -187,12 +196,12 @@ src/dares/
 ├── config.py            # Pydantic configs (data / model / training / experiment)
 ├── data/                # HDF5Dataset, pair transforms, collate, DARESDataLoader
 ├── models/              # backbones (resnet50, convnext, swin) + heads (resunet, deeplabv3p) + SegmentationModel
-├── losses/              # CE, domain (discriminator), advent, cycada, cbst, renyi, dares_loss (DARES)
-├── engines/             # source_only, advent, cycada, cbst, dares trainers + registry
+├── losses/              # CE, domain (discriminator), advent, dacs, fda, dares_loss (DARES)
+├── engines/             # source_only, advent, dacs, fda, dares trainers + registry
 ├── training/            # BaseTrainer (AMP, evaluation, checkpointing, fit loop)
 └── utils/               # metrics (mIoU/DICE/OA/MCC), evaluation, visualizer, reproducibility
 scripts/                 # train.py, evaluate.py, check_data.py
-configs/training/        # one folder per backbone-head pair
+configs/                 # LIME_stress / architectures / ablation experiment folders
 tests/                   # pytest suite (models, data, metrics, engines, scripts)
 ```
 

@@ -200,8 +200,9 @@ The final evaluation protocol benchmarks model resilience across all target vari
 | --- | --- | --- | --- | --- |
 | **EXP-01** | Source Only (Supervised Baseline) | None (Trained on Source only) | `target_test.h5` | mIoU / F1-Score |
 | **EXP-02** | ADVENT (Entropy Minimization) | `target_train.h5` | `target_test.h5` | mIoU / F1-Score |
-| **EXP-03** | CBST (Self-Training / Pseudo-labels) | `target_train.h5` | `target_test.h5` | mIoU / F1-Score |
-| **EXP-04** | **DARES** (Rényi Alignment $\tilde{I}_2$) | `target_train.h5` | `target_test.h5` | mIoU / F1-Score |
-| **EXP-05** | **DARES** vs. Baselines (Stress Low) | `target_train_lime_low.h5` | `target_test_lime_low.h5` | mIoU / F1-Score |
-| **EXP-06** | **DARES** vs. Baselines (Stress Med) | `target_train_lime_med.h5` | `target_test_lime_med.h5` | mIoU / F1-Score |
-| **EXP-07** | **DARES** vs. Baselines (Stress High) | `target_train_lime_high.h5` | `target_test_lime_high.h5` | mIoU / F1-Score |
+| **EXP-03** | DACS (Cross-domain Mixed Sampling) | `target_train.h5` | `target_test.h5` | mIoU / F1-Score |
+| **EXP-04** | FDA (Fourier Domain Adaptation) | `target_train.h5` | `target_test.h5` | mIoU / F1-Score |
+| **EXP-05** | **DARES** (Rényi Alignment $\tilde{I}_2$) | `target_train.h5` | `target_test.h5` | mIoU / F1-Score |
+| **EXP-06** | **DARES** vs. Baselines (Stress Low) | `target_train_lime_low.h5` | `target_test_lime_low.h5` | mIoU / F1-Score |
+| **EXP-07** | **DARES** vs. Baselines (Stress Med) | `target_train_lime_med.h5` | `target_test_lime_med.h5` | mIoU / F1-Score |
+| **EXP-08** | **DARES** vs. Baselines (Stress High) | `target_train_lime_high.h5` | `target_test_lime_high.h5` | mIoU / F1-Score |

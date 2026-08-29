@@ -109,6 +109,21 @@ def test_trust_region_caps_aux_gradient_ratio():
     assert lam > 0.0
 
 
+def test_trust_region_disabled_follows_ramp_only():
+    """With trust_region=False, lambda_eff ignores gradient norms (ramp only)."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0, trust_region=False)
+    p = torch.nn.Parameter(torch.randn(6, 6))
+    loss_seg = (p * 2.0).sum()
+    loss_aux = (p * 0.2).sum()
+
+    crit.step.fill_(crit.ramp_steps)  # fully ramped in
+    lam = crit.update_lambda(loss_seg, loss_aux, [p])
+
+    # p = min(1, ramp_steps / ramp_steps) = 1 -> the sigmoid ramp saturates.
+    s = (1.0 - math.exp(-crit.ramp_delta)) / (1.0 + math.exp(-crit.ramp_delta))
+    assert lam == pytest.approx(crit.lambda_max * s, rel=1e-6)
+
+
 def test_isolated_fp32_under_amp():
     """Kernel math stays finite and fp32 even inside an autocast region."""
     crit = DARESLoss(num_classes=2, warmup_steps=0)

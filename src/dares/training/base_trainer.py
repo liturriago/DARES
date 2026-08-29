@@ -169,7 +169,7 @@ class BaseTrainer(ABC):
         if not all(
             p.grad is None or torch.isfinite(p.grad).all() for p in params
         ):
-            self.optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad(set_to_none=True)
             return False
         clip = self.config.grad_clip
         if clip is not None and clip > 0.0:
@@ -329,7 +329,7 @@ class BaseTrainer(ABC):
         Args:
             path (str): Source checkpoint path.
         """
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.best_state = checkpoint["model"]
         self.best_miou = float(checkpoint.get("best_miou", 0.0))
         self.model.load_state_dict(self.best_state)

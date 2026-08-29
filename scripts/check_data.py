@@ -7,7 +7,7 @@ protocol from ``Docs/data.md``) and the effective batch count per epoch.
 
 Examples:
     python scripts/check_data.py --source_dir data/source --target_dir data/target
-    python scripts/check_data.py --config configs/training/dares.yaml --batch_size 8
+    python scripts/check_data.py --config configs/LIME_stress/medium/dares.yaml --batch_size 8
 """
 import argparse
 from pathlib import Path

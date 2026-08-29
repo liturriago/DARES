@@ -1,7 +1,6 @@
 """Shared adversarial domain alignment components.
 
-Used by the ADVENT engine (entropy-map discriminators) and the CyCADA engine
-(feature-level alignment).
+Used by the ADVENT engine (entropy-map discriminators).
 """
 
 import torch

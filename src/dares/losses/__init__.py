@@ -4,16 +4,16 @@ Loss functions for the DARES framework.
 Shared modules:
 
 * ``ce``  ->  ``SegCrossEntropyLoss`` (pixel-wise cross-entropy).
-* ``domain``  ->  ``DomainDiscriminator`` + ``adversarial_loss`` (shared by the
-  ADVENT and CyCADA engines).
+* ``domain``  ->  ``DomainDiscriminator`` + ``adversarial_loss`` (used by the
+  ADVENT engine).
 
 Method-specific losses live in sibling modules:
 
 * ``advent``  ->  entropy minimization loss (ADVENT engine).
-* ``cycada``  ->  pixel generators, PatchGAN discriminator and cycle losses.
-* ``cbst``  ->  class-balanced pseudo-label selection / self-training loss.
-* ``renyi``  ->  the base DARES alpha-Renyi alignment loss (sampling operator
-  ``Phi_c`` and matrix-based mutual information).
+* ``dacs``  ->  color jitter, Gaussian blur, ClassMix and pseudo-labeling
+  helpers (DACS engine).
+* ``fda``  ->  Fourier-domain amplitude swap and Charbonnier entropy loss (FDA
+  engine).
 * ``dares_loss``  ->  the hardened DARES alignment loss (anti-collapse entropy
   floors, inter-class target repulsion and a GradNorm-lite trust region).
 """

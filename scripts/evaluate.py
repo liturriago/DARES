@@ -6,10 +6,10 @@ full metric report (IoU, DICE, precision, recall, mIoU, accuracy, MCC) and
 saves JSON metrics plus confusion-matrix / prediction-overlay figures.
 
 Examples:
-    python scripts/evaluate.py --config configs/training/dares.yaml \
-        --model outputs/dares/experiment_1/model_final.pth
-    python scripts/evaluate.py --config configs/training/dares.yaml \
-        --model outputs/dares/experiment_1/model_final.pth --output_dir outputs/dares/eval
+    python scripts/evaluate.py --config configs/LIME_stress/medium/dares.yaml \
+        --model outputs/LIME_stress/medium/dares/experiment_1/model_final.pth
+    python scripts/evaluate.py --config configs/LIME_stress/medium/dares.yaml \
+        --model outputs/LIME_stress/medium/dares/experiment_1/model_final.pth --output_dir outputs/dares/eval
 """
 import argparse
 import json
@@ -56,7 +56,7 @@ def main(
 
     # 2. Model + weights
     model = build_model(cfg.model)
-    state = torch.load(model_path, map_location=device)
+    state = torch.load(model_path, map_location=device, weights_only=True)
     if isinstance(state, dict) and "model" in state:
         state = state["model"]
     model.load_state_dict(state)

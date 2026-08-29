@@ -136,35 +136,74 @@ def test_check_data_script(tmp_path, capsys):
     assert "forest ratio" in captured
 
 
-BACKBONES = ["resnet50", "convnext_tiny", "swin_t"]
-HEADS = ["resunet", "deeplabv3p"]
-METHODS = ["source_only", "advent", "cycada", "cbst", "dares"]
+METHODS = ["source_only", "advent", "dacs", "fda", "dares"]
+LIME_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
+ARCH_COMBOS = [
+    "resnet50_resunet",
+    "resnet50_deeplabv3p",
+    "convnext_tiny_deeplabv3p",
+    "swin_t_resunet",
+    "swin_t_deeplabv3p",
+]
 
 
 def test_config_matrix_complete_and_valid():
-    """One config folder per backbone-head pair, five methods each, all parse."""
+    """The three experiment folders parse and point at the right settings."""
     from dares.config import ExperimentConfig
 
-    training_dir = ROOT / "configs" / "training"
-    folders = sorted(p.name for p in training_dir.iterdir() if p.is_dir())
-    expected_folders = sorted(f"{bb}_{hd}" for bb in BACKBONES for hd in HEADS)
-    assert folders == expected_folders, "missing backbone-head folders"
+    configs_root = ROOT / "configs"
 
-    total = 0
-    for folder in folders:
-        backbone, head = folder.rsplit("_", 1)
+    # 1. LIME_stress: convnext_tiny_resunet x 5 methods x 3 LIME levels.
+    lime_dir = configs_root / "LIME_stress"
+    for level, variant in LIME_LEVELS.items():
         for method in METHODS:
-            path = training_dir / folder / f"{method}.yaml"
+            path = lime_dir / level / f"{method}.yaml"
+            assert path.is_file(), f"missing {path}"
+            cfg = ExperimentConfig.from_yaml(path)
+            assert cfg.model.backbone == "convnext_tiny"
+            assert cfg.model.head == "resunet"
+            assert cfg.data.target_variant == variant
+            assert cfg.training.method == method
+            assert cfg.training.epochs == 25
+            assert cfg.training.warmup_epochs == 2
+            assert cfg.experiment.output_dir == Path(
+                f"/content/drive/MyDrive/DARES_experiments/LIME_stress/{level}/{method}/experiment_1"
+            )
+
+    # 2. architectures: source_only + dares, medium, 5 backbone-head combos.
+    arch_dir = configs_root / "architectures"
+    for combo in ARCH_COMBOS:
+        backbone, head = combo.rsplit("_", 1)
+        for method in ("source_only", "dares"):
+            path = arch_dir / combo / f"{method}.yaml"
             assert path.is_file(), f"missing {path}"
             cfg = ExperimentConfig.from_yaml(path)
             assert cfg.model.backbone == backbone
             assert cfg.model.head == head
+            assert cfg.data.target_variant == "medium"
             assert cfg.training.method == method
-            assert cfg.training.epochs == 25
-            expected_warmup = 2 if method == "dares" else 5
-            assert cfg.training.warmup_epochs == expected_warmup
             assert cfg.experiment.output_dir == Path(
-                f"outputs/{folder}/{method}/experiment_1"
+                f"/content/drive/MyDrive/DARES_experiments/architectures/{combo}/{method}/experiment_1"
             )
-            total += 1
-    assert total == len(BACKBONES) * len(HEADS) * len(METHODS) == 30
+
+    # 3. ablation: convnext_tiny_resunet, medium, one DARES component off each.
+    ablation_dir = configs_root / "ablation"
+    expected_ablations = {
+        "dares_no_anti_collapse": {"beta": 0.0, "repulsion_gamma": 0.5, "trust_region": True},
+        "dares_no_repulsion": {"beta": 1.0, "repulsion_gamma": 0.0, "trust_region": True},
+        "dares_no_trust_region": {"beta": 1.0, "repulsion_gamma": 0.5, "trust_region": False},
+    }
+    for name, params in expected_ablations.items():
+        path = ablation_dir / f"{name}.yaml"
+        assert path.is_file(), f"missing {path}"
+        cfg = ExperimentConfig.from_yaml(path)
+        assert cfg.model.backbone == "convnext_tiny"
+        assert cfg.model.head == "resunet"
+        assert cfg.data.target_variant == "medium"
+        assert cfg.training.method == "dares"
+        assert cfg.training.beta == params["beta"]
+        assert cfg.training.repulsion_gamma == params["repulsion_gamma"]
+        assert cfg.training.trust_region == params["trust_region"]
+        assert cfg.experiment.output_dir == Path(
+            f"/content/drive/MyDrive/DARES_experiments/ablation/{name}/experiment_1"
+        )

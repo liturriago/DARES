@@ -8,9 +8,8 @@ loop). Available methods:
 
 * ``source_only``  ->  supervised cross-entropy baseline (no adaptation).
 * ``advent``       ->  adversarial entropy minimization.
-* ``cycada``       ->  cycle-consistent adversarial domain adaptation
-  (pixel + feature alignment).
-* ``cbst``         ->  class-balanced self-training.
+* ``dacs``         ->  cross-domain mixed sampling self-training.
+* ``fda``          ->  Fourier Domain Adaptation (spectral amplitude swap).
 * ``dares``        ->  Domain Adaptation via alpha-Renyi Entropy.
 
 Use ``build_engine(name, model, source_loaders, target_loaders, config,
@@ -19,4 +18,3 @@ device)`` to instantiate an engine.
 from dares.engines.registry import build_engine
 
 __all__ = ["build_engine"]
-

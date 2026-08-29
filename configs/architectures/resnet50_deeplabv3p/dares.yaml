@@ -1,0 +1,45 @@
+data:
+  source_dir: "/root/.cache/kagglehub/datasets/lucasiturriago/dares-amazon-uda/versions/1/Source"
+  target_dir: "/root/.cache/kagglehub/datasets/lucasiturriago/dares-amazon-uda/versions/1/Target_Medium"
+  target_variant: medium
+  batch_size: 8
+  patch_size: 224
+  num_workers: 4
+  mean: [0.0, 0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0, 1.0]
+  use_augmentation: true
+model:
+  backbone: "resnet50"
+  head: "deeplabv3p"
+  in_channels: 4
+  num_classes: 2
+  pretrained: true
+  dropout_rate: 0.1
+training:
+  method: "dares"
+  epochs: 25
+  lr: 0.0001
+  weight_decay: 0.00001
+  use_amp: true
+  device: "cuda"
+  seed: 42
+  warmup_epochs: 2
+  quota: 256
+  min_samples: 8
+  lambda_max: 1.0
+  beta: 1.0
+  repulsion_gamma: 0.5
+  eta_floor: 1.0
+  entropy_gap: 0.25
+  repulsion_margin: 0.2
+  warmup_steps: 1000
+  ramp_steps: 4000
+  ramp_delta: 10.0
+  grad_ratio: 0.8
+  trust_region: true
+  ema_decay: 0.9
+experiment:
+  name: "resnet50_deeplabv3p_dares"
+  version: 1
+  output_dir: "/content/drive/MyDrive/DARES_experiments/architectures/resnet50_deeplabv3p/dares/experiment_1"
+  save_results: true

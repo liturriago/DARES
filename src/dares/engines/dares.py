@@ -70,7 +70,7 @@ class DARESTrainer(BaseTrainer):
             min_samples=config.min_samples,
             lambda_max=config.lambda_max,
             beta=config.beta,
-            gamma=config.gamma,
+            gamma=config.repulsion_gamma,
             eta_floor=config.eta_floor,
             entropy_gap=config.entropy_gap,
             repulsion_margin=config.repulsion_margin,
@@ -78,6 +78,7 @@ class DARESTrainer(BaseTrainer):
             ramp_steps=config.ramp_steps,
             ramp_delta=config.ramp_delta,
             grad_ratio=config.grad_ratio,
+            trust_region=config.trust_region,
             ema_decay=config.ema_decay,
         ).to(device)
         self.ref_params = list(self.model.backbone.reference_params)
