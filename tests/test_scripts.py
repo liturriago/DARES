@@ -167,7 +167,7 @@ def test_config_matrix_complete_and_valid():
             assert cfg.training.epochs == 25
             assert cfg.training.warmup_epochs == 2
             assert cfg.experiment.output_dir == Path(
-                f"/content/drive/MyDrive/DARES_experiments/LIME_stress/{level}/{method}/experiment_1"
+                f"outputs/LIME_stress/{level}/{method}/experiment_1"
             )
 
     # 2. architectures: source_only + dares, medium, 5 backbone-head combos.
@@ -183,7 +183,7 @@ def test_config_matrix_complete_and_valid():
             assert cfg.data.target_variant == "medium"
             assert cfg.training.method == method
             assert cfg.experiment.output_dir == Path(
-                f"/content/drive/MyDrive/DARES_experiments/architectures/{combo}/{method}/experiment_1"
+                f"outputs/architectures/{combo}/{method}/experiment_1"
             )
 
     # 3. ablation: convnext_tiny_resunet, medium, one DARES component off each.
@@ -205,5 +205,5 @@ def test_config_matrix_complete_and_valid():
         assert cfg.training.repulsion_gamma == params["repulsion_gamma"]
         assert cfg.training.trust_region == params["trust_region"]
         assert cfg.experiment.output_dir == Path(
-            f"/content/drive/MyDrive/DARES_experiments/ablation/{name}/experiment_1"
+            f"outputs/ablation/{name}/experiment_1"
         )

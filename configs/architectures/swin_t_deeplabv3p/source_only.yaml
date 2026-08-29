@@ -1,6 +1,6 @@
 data:
-  source_dir: "/root/.cache/kagglehub/datasets/lucasiturriago/dares-amazon-uda/versions/1/Source"
-  target_dir: "/root/.cache/kagglehub/datasets/lucasiturriago/dares-amazon-uda/versions/1/Target_Medium"
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Medium"
   target_variant: medium
   batch_size: 8
   patch_size: 224
@@ -27,5 +27,5 @@ training:
 experiment:
   name: "swin_t_deeplabv3p_source_only"
   version: 1
-  output_dir: "/content/drive/MyDrive/DARES_experiments/architectures/swin_t_deeplabv3p/source_only/experiment_1"
+  output_dir: "outputs/architectures/swin_t_deeplabv3p/source_only/experiment_1"
   save_results: true

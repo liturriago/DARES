@@ -1,6 +1,6 @@
 data:
-  source_dir: "/root/.cache/kagglehub/datasets/lucasiturriago/dares-amazon-uda/versions/1/Source"
-  target_dir: "/root/.cache/kagglehub/datasets/lucasiturriago/dares-amazon-uda/versions/1/Target_Low"
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Low"
   target_variant: low
   batch_size: 8
   patch_size: 224
@@ -41,5 +41,5 @@ training:
 experiment:
   name: "convnext_resunet_low_dares"
   version: 1
-  output_dir: "/content/drive/MyDrive/DARES_experiments/LIME_stress/low/dares/experiment_1"
+  output_dir: "outputs/LIME_stress/low/dares/experiment_1"
   save_results: true
