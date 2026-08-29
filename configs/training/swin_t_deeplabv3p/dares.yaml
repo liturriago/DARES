@@ -24,13 +24,6 @@ training:
   use_amp: true
   device: "cuda"
   seed: 42
-  lambda_renyi: 0.2
-  tau: 0.8
-  n_max: 1024
-  sigma: "auto"
-  alpha: 2
-  grid_size: 16
-  schedule_delta: 12
   warmup_epochs: 2
   quota: 256
   min_samples: 8
