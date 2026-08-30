@@ -33,7 +33,7 @@ training:
   min_samples: 8
 
   # Ponderación y rampas de alineación
-  lambda_max: 1.0
+  lambda_max: 5.0
   warmup_steps: 1000
   ramp_steps: 4000
   ramp_delta: 10.0
