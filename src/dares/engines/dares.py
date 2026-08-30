@@ -2,15 +2,9 @@
 
 The DARES objective combines the supervised segmentation loss on the source
 domain with the class-conditional Renyi-2 alignment on unlabeled target
-batches. This engine uses the hardened ``DARESLoss`` (ported from the
-reference module in ``Docs/``), which adds anti-collapse entropy floors,
+batches. This engine uses the hardened DARESLoss with anti-collapse floors,
 inter-class target repulsion and a per-step GradNorm-lite trust region on the
-reference (deepest encoder block) parameters.
-
-``L = L_seg + lambda_eff * (L_align + beta * L_ac + gamma * L_rep)``
-
-where ``lambda_eff`` is scheduled per-step by :meth:`DARESLoss.update_lambda`
-(warm-up -> sigmoid ramp -> gradient-ratio cap) instead of by epoch.
+reference parameters.
 """
 
 import time
@@ -44,32 +38,7 @@ _METRIC_KEYS = (
 
 
 class DARESTrainer(BaseTrainer):
-    """Unsupervised domain adaptation via hardened class-conditional alignment.
-
-    Parameters
-    ----------
-    model : nn.Module
-        The segmentation model (a ``dares.models`` ``SegmentationModel``).
-    source_loaders : dict[str, DataLoader]
-        ``{"train", "validation", "test"}`` labeled source loaders.
-    target_loaders : dict[str, DataLoader]
-        ``{"train", "validation", "test"}`` target loaders; ``train`` is
-        unlabeled and only its pseudo-labels are used for alignment.
-    config : TrainConfig
-        Training configuration.
-    device : torch.device
-        Computing device.
-
-    Attributes
-    ----------
-    criterion : DARESLoss
-        The hardened class-conditional Renyi-2 alignment loss (DARES).
-    ref_params : list[torch.Tensor]
-        Reference parameters for the trust-region gradient balancing (the
-        deepest shared encoder block).
-    optimizer : torch.optim.Adam
-        Adam optimizer over the model parameters.
-    """
+    """Unsupervised domain adaptation via hardened class-conditional alignment."""
 
     def __init__(
         self,
@@ -79,59 +48,46 @@ class DARESTrainer(BaseTrainer):
         config: TrainConfig,
         device: torch.device,
     ) -> None:
-        """Initializes the DARES criterion, reference params and optimizer."""
         super().__init__(model, source_loaders, target_loaders, config, device)
+        
+        # Compatibilidad robusta para nombres de variables entre configs
+        gamma_val = getattr(config, "gamma", getattr(config, "repulsion_gamma", 0.5))
+        
         self.criterion = DARESLoss(
             num_classes=self.num_classes,
-            quota=config.quota,
-            min_samples=config.min_samples,
-            lambda_max=config.lambda_max,
-            beta=config.beta,
-            gamma=config.repulsion_gamma,
-            eta_floor=config.eta_floor,
-            entropy_gap=config.entropy_gap,
-            repulsion_margin=config.repulsion_margin,
-            warmup_steps=config.warmup_steps,
-            ramp_steps=config.ramp_steps,
-            ramp_delta=config.ramp_delta,
-            grad_ratio=config.grad_ratio,
-            trust_region=config.trust_region,
-            ema_decay=config.ema_decay,
-            align_form=config.align_form,
-            use_renyi_em=config.use_renyi_em,
-            lambda_em=config.lambda_em,
-            em_pool=config.em_pool,
-            em_pool_kernel=config.em_pool_kernel,
+            quota=getattr(config, "quota", 256),
+            min_samples=getattr(config, "min_samples", 8),
+            lambda_max=getattr(config, "lambda_max", 1.0),
+            beta=getattr(config, "beta", 1.0),
+            gamma=gamma_val,
+            eta_floor=getattr(config, "eta_floor", 1.0),
+            entropy_gap=getattr(config, "entropy_gap", 0.25),
+            repulsion_margin=getattr(config, "repulsion_margin", 0.2),
+            warmup_steps=getattr(config, "warmup_steps", 1000),
+            ramp_steps=getattr(config, "ramp_steps", 4000),
+            ramp_delta=getattr(config, "ramp_delta", 10.0),
+            grad_ratio=getattr(config, "grad_ratio", 0.8),
+            trust_region=getattr(config, "trust_region", True),
+            ema_decay=getattr(config, "ema_decay", 0.9),
+            align_form=getattr(config, "align_form", "mi"),
+            use_renyi_em=getattr(config, "use_renyi_em", True),
+            lambda_em=getattr(config, "lambda_em", 0.05),
+            em_pool=getattr(config, "em_pool", False),
+            em_pool_kernel=getattr(config, "em_pool_kernel", 3),
         ).to(device)
+        
         self.ref_params = list(self.model.backbone.reference_params)
         self.optimizer = self._make_optimizer(self.model.parameters())
 
     def train_epoch(self) -> dict[str, float]:
-        """Runs one epoch of DARES training.
-
-        While the criterion is still in its per-step warm-up phase the engine
-        trains source-only (identical forward/backward to ``source_only``): no
-        target forward pass, no alignment and no quota sampling, so the two
-        methods stay bit-comparable while ``lambda_eff == 0`` (this resolves the
-        warm-up confound flagged in the improvement plan). Once ``warmup_steps``
-        is reached, it pairs source and target batches with ``_dual_iterators``
-        and computes the DARES alignment over the deepest encoder features,
-        calling :meth:`DARESLoss.update_lambda` after forward and before
-        backward.
-
-        Returns
-        -------
-        dict[str, float]
-            The loss / diagnostic epoch averages (``_METRIC_KEYS``) plus
-            ``"epoch_time"`` (seconds).
-        """
+        """Runs one epoch of DARES training."""
         self.model.train()
         if self.criterion.in_warmup():
             return self._train_warmup_epoch()
         return self._train_dual_epoch()
 
     def _train_warmup_epoch(self) -> dict[str, float]:
-        """Source-only warm-up epoch (identical to ``source_only``)."""
+        """Source-only warm-up epoch calibrating EMA gradient statistics."""
         acc: dict[str, float] = {k: 0.0 for k in _METRIC_KEYS}
         start_time = time.time()
         n = 0
@@ -147,8 +103,8 @@ class DARESTrainer(BaseTrainer):
                 logits = self.model(imgs, mode="class")
                 loss_seg = F.cross_entropy(logits, masks, ignore_index=255)
 
-            # Advance the per-step schedule (lambda_eff stays 0 during warm-up).
-            self.criterion.update_lambda(loss_seg, loss_seg.detach(), self.ref_params)
+            # Actualiza el EMA de gradiente supervisado desde el paso 1
+            self.criterion.update_lambda(loss_seg, None, self.ref_params)
 
             stepped = super()._backward_step(loss_seg, self.optimizer)
             if stepped:
@@ -167,7 +123,7 @@ class DARESTrainer(BaseTrainer):
         return out
 
     def _train_dual_epoch(self) -> dict[str, float]:
-        """Paired source/target epoch with the DARES alignment active."""
+        """Paired source/target epoch with synchronized DARES alignment."""
         src_iter, tgt_iter, num_batches = self._dual_iterators(
             self.source_loaders["train"], self.target_loaders["train"]
         )
@@ -188,28 +144,30 @@ class DARESTrainer(BaseTrainer):
             imgs_t = imgs_t.to(self.device)
 
             with autocast(device_type=self.device.type, enabled=self.use_amp):
-                # Deep (bottleneck) features for alignment, full-res logits for
-                # the supervised loss and pseudo-label confidence weighting.
                 feats_s, logits_s = self.model(imgs_s, mode="deep")
                 feats_t, logits_t = self.model(imgs_t, mode="deep")
-                total, parts = self.criterion(
+                _, parts = self.criterion(
                     feats_s, logits_s, masks_s, feats_t, logits_t
                 )
 
-            # Trust-region lambda update: strictly after forward, before
-            # backward (keeps the graph via retain_graph=True).
-            self.criterion.update_lambda(
+            # 1. Actualiza lambda_eff con base en los gradientes del lote actual
+            lam_eff = self.criterion.update_lambda(
                 parts["loss_seg"], parts["loss_aux"], self.ref_params
             )
 
-            # Backprop, AMP guard / clip and optimizer step (base trainer).
+            # 2. Reconstruye el loss total exacto con el lambda_eff recién calculado
+            total = (
+                parts["loss_seg"]
+                + float(lam_eff) * parts["loss_aux"]
+                + self.criterion.lambda_em * parts["loss_em"]
+            )
+
+            # 3. Paso de optimización
             stepped = super()._backward_step(total, self.optimizer)
-            # Finalize the AMP scaler cycle only after a real step: update()
-            # asserts that an inf check was recorded, which step() does.
             if stepped:
                 self.scaler.update()
             self.optimizer.zero_grad(set_to_none=True)
-            pbar.set_postfix(loss=f"{total.item():.4f}")
+            pbar.set_postfix(loss=f"{total.item():.4f}", lam=f"{lam_eff:.3f}")
 
             acc["loss_total"] += float(total.detach().cpu().item())
             acc["loss_seg"] += float(parts["loss_seg"].detach().cpu().item())
@@ -218,7 +176,7 @@ class DARESTrainer(BaseTrainer):
                 parts["loss_anti_collapse"].detach().cpu().item()
             )
             rep = parts["loss_repulsion"].detach().cpu().item()
-            acc["loss_repulsion"] += 0.0 if rep != rep else rep  # skip NaN
+            acc["loss_repulsion"] += 0.0 if rep != rep else rep
             acc["loss_em"] += float(parts["loss_em"].detach().cpu().item())
             acc["h2_source_mean"] += float(
                 parts["h2_source_mean"].detach().cpu().item()
@@ -230,8 +188,8 @@ class DARESTrainer(BaseTrainer):
                 parts["delta_align_mean"].detach().cpu().item()
             )
             drep = parts["delta_repulsion_mean"].detach().cpu().item()
-            acc["delta_repulsion_mean"] += 0.0 if drep != drep else drep  # skip NaN
-            acc["lambda_eff"] += float(parts["lambda_eff"].detach().cpu().item())
+            acc["delta_repulsion_mean"] += 0.0 if drep != drep else drep
+            acc["lambda_eff"] += float(lam_eff)
             acc["n_valid_classes"] += float(
                 parts["n_valid_classes"].detach().cpu().item()
             )
