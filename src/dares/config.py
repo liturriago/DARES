@@ -135,25 +135,6 @@ class TrainConfig(BaseModel):
             (gradient-ratio cap). When ``False`` the alignment weight follows
             only the sigmoid ramp (``lambda_eff = lambda_max * s(t)``).
         ema_decay (float): DARESLoss EMA decay for gradient norms.
-        two_sided_gap (bool): DARESLoss make the target entropy constraint a
-            two-sided band around the source entropy. When ``True`` the
-            anti-collapse term penalizes both ``H2_target < H2_source - gap``
-            and ``H2_target > H2_source + gap``, closing the over-dispersion
-            direction the Rényi estimator can otherwise exploit.
-        pl_threshold (float): DARES confidence threshold for target-class
-            membership in the alignment (``conf > pl_threshold``) and for
-            pseudo-label self-training. ``0.0`` disables the membership filter.
-        self_training (bool): DARES enable dense target supervision via
-            confidence-thresholded pseudo-labels produced by an EMA teacher.
-        lambda_pl (float): DARES weight of the pseudo-label / ClassMix
-            self-training term.
-        teacher_ema_decay (float): DARES EMA decay of the teacher model.
-        use_classmix (bool): DARES enable ClassMix-style source/target mixing
-            on top of the pseudo-label term.
-        classmix_mix_ratio (float): DARES fraction of source classes pasted in
-            ClassMix.
-        fda_enable (bool): DARES enable FDA-style input-space Fourier amplitude
-            swap on the source images before the forward pass.
         method (Literal): UDA method driving ``build_engine`` (``"source_only"``,
             ``"advent"``, ``"dacs"``, ``"fda"`` or ``"dares"``).
         lambda_adv (float): ADVENT adversarial alignment weight.
@@ -201,16 +182,6 @@ class TrainConfig(BaseModel):
     grad_ratio: float = Field(default=0.8, gt=0.0)
     trust_region: bool = True
     ema_decay: float = Field(default=0.9, gt=0.0, le=1.0)
-
-    # DARES two-sided entropy band + dense target supervision
-    two_sided_gap: bool = True
-    pl_threshold: float = Field(default=0.968, gt=0.0, le=1.0)
-    self_training: bool = True
-    lambda_pl: float = Field(default=1.0, ge=0.0)
-    teacher_ema_decay: float = Field(default=0.999, gt=0.0, le=1.0)
-    use_classmix: bool = True
-    classmix_mix_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
-    fda_enable: bool = True
 
     # Method selection (drives build_engine)
     method: Literal["source_only", "advent", "dacs", "fda", "dares"] = "dares"

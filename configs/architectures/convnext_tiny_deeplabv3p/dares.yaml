@@ -38,16 +38,6 @@ training:
   grad_ratio: 0.8
   trust_region: true
   ema_decay: 0.9
-  # Dense target supervision (EMA teacher self-training + ClassMix)
-  self_training: true
-  lambda_pl: 1.0
-  pl_threshold: 0.968
-  teacher_ema_decay: 0.999
-  use_classmix: true
-  classmix_mix_ratio: 0.5
-  # Input-space adaptation + two-sided entropy band
-  fda_enable: true
-  two_sided_gap: true
 experiment:
   name: "convnext_tiny_deeplabv3p_dares"
   version: 1

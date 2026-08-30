@@ -38,7 +38,4 @@ class SegCrossEntropyLoss(nn.Module):
         """
         if masks is None:
             return torch.tensor(0.0, device=logits.device)
-        masks = masks.long()
-        if int((masks != self.ignore_index).sum()) == 0:
-            return torch.tensor(0.0, device=logits.device)
-        return F.cross_entropy(logits, masks, ignore_index=self.ignore_index)
+        return F.cross_entropy(logits, masks.long(), ignore_index=self.ignore_index)
