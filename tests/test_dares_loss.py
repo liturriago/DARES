@@ -161,7 +161,7 @@ def test_update_lambda_safe_with_frozen_ref_params():
     # Frozen reference block (as during backbone warm-up).
     p = torch.nn.Parameter(torch.randn(4, 4), requires_grad=False)
     loss_seg = (torch.randn(4, 4) @ p.detach() * 1.0).sum()  # disconnected
-    loss_aux = torch.randn((), requires_grad=True)            # disconnected leaf
+    loss_aux = torch.randn((), requires_grad=True)  # disconnected leaf
 
     lam = crit.update_lambda(loss_seg, loss_aux, [p])
 
@@ -180,3 +180,158 @@ def test_step_counter_is_monotonic_across_update_lambda():
         crit.update_lambda(out.sum(), (out * 0.5).sum(), [p])
 
     assert int(crit.step.item()) == base + 5
+
+
+def test_align_form_default_is_ce():
+    """The default alignment form is the conditional-entropy (ce) form."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
+    assert crit.align_form == "ce"
+
+
+def test_invalid_align_form_raises():
+    """align_form rejects anything other than 'ce' / 'mi'."""
+    with pytest.raises(ValueError):
+        DARESLoss(num_classes=2, align_form="mmd")
+
+
+def test_align_form_ce_and_mi_differ_on_dispersed_target():
+    """The ce and mi forms produce different alignment values on a dispersed
+    target cloud (the mi form carries the -1/2 H2_t dispersion reward)."""
+    torch.manual_seed(3)
+    fs, ft, ls = _feats(seed=5)
+    fs, ft = fs * 4.0, ft * 4.0  # dispersed regime
+    logits_s = torch.randn(2, 2, 16, 16)
+    logits_t = torch.randn(2, 2, 16, 16)
+    logits_t[:, 0] += 3.0
+
+    _, parts_ce = DARESLoss(num_classes=2, warmup_steps=0, align_form="ce")(
+        fs, logits_s, ls, ft, logits_t
+    )
+    _, parts_mi = DARESLoss(num_classes=2, warmup_steps=0, align_form="mi")(
+        fs, logits_s, ls, ft, logits_t
+    )
+
+    assert torch.isfinite(parts_ce["delta_align_mean"])
+    assert torch.isfinite(parts_mi["delta_align_mean"])
+    assert parts_ce["delta_align_mean"].item() != pytest.approx(
+        parts_mi["delta_align_mean"].item(), abs=1e-6
+    )
+
+
+def test_align_form_ce_still_stop_grads_source():
+    """The ce form keeps the asymmetric source anchoring (no grad -> fs)."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0, align_form="ce")
+    fs, ft, ls = _feats(seed=1)
+    fs.requires_grad_(True)
+    ft.requires_grad_(True)
+    logits_s = torch.randn(2, 2, 16, 16, requires_grad=True)
+    logits_t = torch.randn(2, 2, 16, 16)
+    logits_t[:, 1] += 3.0
+
+    _, parts = crit(fs, logits_s, ls, ft, logits_t)
+    parts["loss_aux"].backward()
+
+    assert torch.all(fs.grad == 0)
+    assert ft.grad is not None
+
+
+def test_renyi_em_matches_manual_formula():
+    """loss_em equals mean(w * H2(p)) with w the confidence weight."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0, use_renyi_em=True, em_pool=False)
+    fs, ft, ls = _feats(seed=11)
+    logits_s = torch.randn(2, 2, 16, 16)
+    logits_t = torch.randn(2, 2, 16, 16)
+
+    _, parts = crit(fs, logits_s, ls, ft, logits_t)
+
+    p = torch.softmax(logits_t.float(), dim=1)
+    p = p.flatten(2).transpose(1, 2).reshape(-1, 2)
+    p2 = (p * p).sum(dim=1).clamp_min(crit.eps)
+    w = (1.0 + torch.log2(p2) / math.log2(2)).clamp(0.0, 1.0)
+    h2 = -torch.log2(p2)
+    expected = (w * h2).mean().item()
+
+    assert parts["loss_em"].item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_renyi_em_disabled_is_zero():
+    """use_renyi_em=False yields a zero EM term and a finite total."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0, use_renyi_em=False)
+    fs, ft, ls = _feats(seed=12)
+    logits_s = torch.randn(2, 2, 16, 16)
+    logits_t = torch.randn(2, 2, 16, 16)
+
+    total, parts = crit(fs, logits_s, ls, ft, logits_t)
+
+    assert parts["loss_em"].item() == 0.0
+    assert torch.isfinite(total)
+
+
+def test_renyi_em_uniform_predictions_not_forced():
+    """Fully ambiguous (uniform) predictions have w=0, so they contribute ~0
+    to the EM term -- they are not forced into arbitrary confident mistakes."""
+    fs, ft, ls = _feats(seed=13)
+    logits_s = torch.randn(2, 2, 16, 16)
+    logits_uniform = torch.zeros(2, 2, 16, 16)  # p2 = 1/C -> w = 0
+
+    _, parts = DARESLoss(num_classes=2, warmup_steps=0)(
+        fs, logits_s, ls, ft, logits_uniform
+    )
+
+    assert parts["loss_em"].item() == pytest.approx(0.0, abs=1e-5)
+
+
+def test_renyi_em_peaks_at_partial_confidence():
+    """The w * H2 term is ~0 at both extremes (uniform, fully confident) and
+    positive in between, so it focuses on the decision boundary."""
+    fs, ft, ls = _feats(seed=13)
+    logits_s = torch.randn(2, 2, 16, 16)
+
+    logits_uniform = torch.zeros(2, 2, 16, 16)
+    logits_partial = torch.full((2, 2, 16, 16), 0.9)
+    logits_partial[:, 1] = 0.0  # moderately confident -> p2 ~ 0.7
+    logits_sharp = torch.zeros(2, 2, 16, 16)
+    logits_sharp[:, 0] = 10.0  # near one-hot
+
+    def em(logits_t):
+        _, parts = DARESLoss(num_classes=2, warmup_steps=0)(
+            fs, logits_s, ls, ft, logits_t
+        )
+        return parts["loss_em"].item()
+
+    assert em(logits_uniform) == pytest.approx(0.0, abs=1e-5)
+    assert em(logits_partial) > 0.0
+    assert em(logits_sharp) == pytest.approx(0.0, abs=1e-3)
+
+
+def test_quota_without_replacement_no_duplicates():
+    """When n < quota the indices are returned without replacement (no dupes)."""
+    crit = DARESLoss(num_classes=2, quota=256, min_samples=1, warmup_steps=0)
+    mask = torch.zeros(20, dtype=torch.bool)
+    mask[:5] = True  # only 5 members, fewer than quota
+    idx = crit._quota_indices(mask)
+
+    assert idx is not None
+    assert idx.numel() == 5
+    assert len(set(idx.tolist())) == 5  # no duplicate indices
+
+
+def test_variable_cardinality_repulsion_runs():
+    """Two classes with different cardinalities still compute a finite
+    repulsion (padding with zero weights keeps the batched cdist valid)."""
+    torch.manual_seed(14)
+    crit = DARESLoss(num_classes=2, warmup_steps=0, repulsion_margin=0.2)
+    fs = torch.randn(2, 8, 16, 16)
+    ft = torch.randn(2, 8, 16, 16)
+    ls = torch.randint(0, 2, (2, 16, 16))
+    logits_s = torch.randn(2, 2, 16, 16)
+    logits_t = torch.zeros(2, 2, 16, 16)
+    # class 0 confident on a tiny region, class 1 confident on the rest.
+    logits_t[:, 0, :, :2] = 5.0
+    logits_t[:, 1, :, 2:] = 5.0
+
+    total, parts = crit(fs, logits_s, ls, ft, logits_t)
+
+    assert parts["n_rep_pairs"].item() >= 1
+    assert torch.isfinite(total)
+    assert torch.isfinite(parts["delta_repulsion_mean"])

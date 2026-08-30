@@ -30,6 +30,7 @@ class DataConfig(BaseModel):
         use_augmentation (bool): Whether to apply spatial augmentations to the
             source training set.
     """
+
     source_dir: Path
     target_dir: Path
     target_variant: Literal["original", "low", "medium", "high"] = "original"
@@ -80,6 +81,7 @@ class ModelConfig(BaseModel):
         feature_dim (int): Dimension of the dense feature map returned in
             'feature' mode (used for Gram matrix computation).
     """
+
     backbone: Literal[
         "resnet50",
         "convnext_tiny",
@@ -94,9 +96,7 @@ class ModelConfig(BaseModel):
     num_classes: int = Field(default=2, gt=0)
     pretrained: bool = True
     dropout_rate: float = Field(default=0.1, ge=0.0, le=1.0)
-    resunet_channels: list[int] = Field(
-        default_factory=lambda: [512, 256, 128, 64, 32]
-    )
+    resunet_channels: list[int] = Field(default_factory=lambda: [512, 256, 128, 64, 32])
     deeplab_aspp_channels: int = Field(default=256, gt=0)
     deeplab_low_level_channels: int = Field(default=48, gt=0)
 
@@ -135,6 +135,16 @@ class TrainConfig(BaseModel):
             (gradient-ratio cap). When ``False`` the alignment weight follows
             only the sigmoid ramp (``lambda_eff = lambda_max * s(t)``).
         ema_decay (float): DARESLoss EMA decay for gradient norms.
+        align_form (Literal): DARESLoss alignment form. ``"ce"`` computes the
+            Renyi-2 conditional entropy ``H2(K_mix) - H2(K_s)`` (source stop-
+            graduated, no target over-dispersion reward); ``"mi"`` retains the
+            per-class MI surrogate for ablation.
+        use_renyi_em (bool): DARESLoss enable the dense Renyi-2 entropy-
+            minimization term on target predictions.
+        lambda_em (float): DARESLoss schedule-free weight of the Renyi-EM term.
+        em_pool (bool): DARESLoss spatially pool the confidence weight before
+            it weights the Renyi-EM term.
+        em_pool_kernel (int): DARESLoss kernel size of the optional spatial pool.
         method (Literal): UDA method driving ``build_engine`` (``"source_only"``,
             ``"advent"``, ``"dacs"``, ``"fda"`` or ``"dares"``).
         lambda_adv (float): ADVENT adversarial alignment weight.
@@ -151,6 +161,7 @@ class TrainConfig(BaseModel):
         fda_lambda_entropy (float): FDA entropy-regularization weight.
         fda_eta (float): FDA Charbonnier entropy exponent.
     """
+
     epochs: int = Field(default=45, gt=0)
     lr: float = Field(default=1e-4, gt=0)
     weight_decay: float = Field(default=1e-5, ge=0.0)
@@ -180,8 +191,13 @@ class TrainConfig(BaseModel):
     ramp_steps: int = Field(default=4000, ge=1)
     ramp_delta: float = Field(default=10.0, gt=0.0)
     grad_ratio: float = Field(default=0.8, gt=0.0)
-    trust_region: bool = True
+    trust_region: bool = False
     ema_decay: float = Field(default=0.9, gt=0.0, le=1.0)
+    align_form: Literal["ce", "mi"] = "ce"
+    use_renyi_em: bool = True
+    lambda_em: float = Field(default=0.05, ge=0.0)
+    em_pool: bool = False
+    em_pool_kernel: int = Field(default=3, gt=0)
 
     # Method selection (drives build_engine)
     method: Literal["source_only", "advent", "dacs", "fda", "dares"] = "dares"
@@ -224,6 +240,7 @@ class ExperimentMetadata(BaseModel):
         output_dir (Path): Directory to save logs, models, and visualizations.
         save_results (bool): Whether to save the results of the experiment.
     """
+
     name: str = "dares_experiment"
     version: int = Field(default=1, ge=0)
     output_dir: Path = Path("outputs/experiment_1")
@@ -239,6 +256,7 @@ class ExperimentConfig(BaseModel):
         training (TrainConfig): Training-related settings.
         experiment (ExperimentMetadata): Metadata for tracking.
     """
+
     data: DataConfig
     model: ModelConfig
     training: TrainConfig

@@ -1,155 +1,136 @@
-# DARES Improvement Plan — Diagnosis and Action Items
+# DARES Improvement Plan v2 — Mathematically Defensible Route
 
-**Status:** Hand-off document for an implementing agent.
-**Basis:** Analysis of `Docs/KimiReport.txt`, `Docs/CREDA.md`, `Docs/SegCREDA.py`,
-`reports/LIME_stress/medium/*` and `configs/LIME_stress/medium/*` only.
-**Task setting:** Binary UDA segmentation (forest / non_forest), ConvNeXt-Tiny +
-ResUNet, 4-channel input, source → Target_Medium, 25 epochs, batch 8, patch 224.
+**Status:** Supersedes v1 (the "mix of methods" version, reverted in git).
+**Goal:** Close the gap to DACS *without* importing foreign mechanisms
+(EMA teacher, ClassMix, FDA). Every improvement must stay inside the Rényi-2 /
+Gram-matrix framework so the contribution remains causally attributable to the
+headline term. Optional input/self-training ingredients are deferred to an
+explicit ablation tier, never part of the core method.
+
+**Basis:** `Docs/KimiReport.txt` (CREDA→segmentation adaptation, theory),
+`Docs/CREDA.md` (original paper), `Docs/SegCREDA.py` (reference hardened
+module), Run evidence from `reports/LIME_stress/medium/*`.
 
 ---
 
-## 1. Current results (LIME_stress / medium, target TEST mIoU)
+## 1. Diagnosis (unchanged from v1 — still valid)
 
-| Method | Target mIoU | forest IoU | forest recall | Source mIoU |
-|---|---|---|---|---|
-| DACS | **0.7861** | 0.7963 | 0.9599 | 0.8259 |
-| FDA | 0.5416 | 0.4352 | 0.4386 | 0.7804 |
-| ADVENT | 0.5347 | 0.4737 | 0.5483 | 0.8675 |
-| **DARES** | **0.4949** | 0.4104 | 0.4655 | **0.8323** |
-| source_only | 0.3647 | 0.1740 | 0.1761 | **0.8885** |
+- Best checkpoint (0.4991) is at epoch 2, before adaptation was active.
+- `loss_align` exploited via target over-dispersion: Δ → −2.77 bits. The root
+  cause is the **−½H2_t reward inside the Rényi mutual-information surrogate**
+  `Ĩ2 = ½H2_s + ½H2_t − H2(mix)` (KimiReport Part II §0/§1.1). Because the
+  source is stop-graduated, maximizing Ĩ2 over the target = minimizing
+  `H2(mix) − ½H2_t`, and the +½H2_t term pays for dispersion.
+- Safeguards constrained the feasible set but did not bound the exploit:
+  anti-collapse is only a *lower* bound on target entropy.
+- Trust region responded by suppressing λ_eff to ~1% of λ_max — the headline
+  term became a near-no-op, unsatisfiable in a methods paper.
+- Failure concentrated in forest recall (0.47 vs DACS 0.96): a density-of-
+  supervision problem.
 
-DARES gains only +0.13 over source_only, trails DACS by −0.29, and is the only
-adapted method that **loses source-domain performance** (0.8323 vs 0.8885).
+## 2. The defensible repair (replaces the old P0)
 
-## 2. Evidence from the DARES training log (`reports/LIME_stress/medium/dares.txt`)
+### 2.1 Root fix — conditional-entropy alignment, not a band patch
 
-1. **Best checkpoint predates adaptation.** Best target val mIoU = 0.4991 at
-   epoch 2, where `loss_total == loss_seg` exactly (λ_eff = 0 in warmup, frozen
-   backbone). From epoch 3 (backbone unfrozen, λ > 0) target val drops to ~0.44
-   and fluctuates 0.41–0.48 for 23 epochs without recovering.
-2. **Estimator exploited in the over-dispersion direction.** `loss_align` drifts
-   monotonically −0.25 → **−2.77 bits** (a true match is Δ ≈ 0). With the source
-   stop-graduated, Δ = H2(mix) − ½H2_s − ½H2_t can only be pushed negative by
-   **inflating target dispersion** — the −½H2_t term pays ~0.5 bit per bit of
-   target entropy growth. The anti-collapse floor is only a *lower* bound, so it
-   stays silent (`loss_anti_collapse` → ~0.001) while Δ is gamed.
-3. **Safeguards inactive from epoch 4.** `loss_repulsion` → ~0.0002,
-   `loss_anti_collapse` → ~0.001. No collapse occurred — the floors work — but
-   they do not bound the opposite failure mode.
-4. **Trust region strangles the method.** Backing λ_eff out of
-   `loss_total − loss_seg = λ_eff·loss_aux`: λ_eff ≈ 0.0026 (epoch 3) →
-   ≈ 0.011 (epoch 25), i.e. ~1% of λ_max = 1.0. With grad_ratio ρ = 0.8 this
-   implies aux gradients are ~50–80× seg gradients — gradient domination is
-   real, and the response (suppress λ) leaves the method contributing almost no
-   useful signal while applying a flawed direction for 23 epochs.
-5. **Source corruption despite anchoring.** Source val mIoU 0.82 (epoch 2) →
-   ~0.76–0.78 late; source test 0.8323 vs 0.8885 for source_only. sg(Φ_s)
-   freezes the anchor only *within* a step: target-side gradients still update
-   the shared encoder, moving the source manifold at the next step.
-6. **Failure concentrated in forest recall.** Target forest: precision 0.776,
-   recall 0.466 — the classifier stays conservative under shift. DACS solves
-   exactly this (recall 0.96) via dense per-pixel pseudo-supervision. DARES's
-   only target signal is a second-order statistic over 256 sampled bottleneck
-   vectors per class.
+In `Docs/SegCREDA.py` / `src/dares/losses/dares_loss.py`, replace the per-class
+MI surrogate with the **conditional-entropy form**:
 
-## 3. Action items
+    L_align,c = H2(K_c^mix) − H2(K_c^s)        (source side stop-graduated)
 
-### P0 — Close the estimator's free-lunch direction
-File: `src/losses/dares_loss.py` (class `DARESLoss`), see `_delta_bits`, `forward`.
+Removing the −½H2_t term removes the dispersion reward *by construction*; no
+two-sided band patch needed. This stays entirely in the matrix-based Rényi-2
+family and fits the paper's "conditional adaptation" branding. Justification
+is already in `Docs/KimiReport.txt` Part II §1.1: the block-matrix MI
+construction fails subadditivity in the dispersed (segmentation) regime, hence
+the conditional form is the *correct* estimator there. Keep the entropy floors
+and repulsion hinge — they carve the feasible set independently of which
+intra-class divergence is plugged in.
 
-- **Make the target entropy constraint two-sided.** Replace
-  `floor_t = ReLU(H_s.detach() − entropy_gap − H_t)` with a symmetric band:
-  penalize both `H_s_sg − gap − H_t` and `H_t − H_s_sg − gap`. This directly
-  caps the over-dispersion reward observed in the log.
-- **Alternative (or additionally):** remove the marginal target-entropy bonus —
-  use a conditional form `H2(mix) − H2_s` (no −½H2_t term to inflate), or
-  replace the per-class term with MMD² on the same Gram blocks. (The Dirac
-  objection in KimiReport Part II §1.1 no longer applies once floors +
-  anchoring exist; the run shows the *opposite* basin is the live threat.)
-- **Observability (non-negotiable):** log per epoch the diagnostics the module
-  already returns: `h2_source_mean`, `h2_target_mean`, `delta_align_mean`,
-  `delta_repulsion_mean`, `lambda_eff`, `n_valid_classes`. The run's central
-  pathology had to be reverse-engineered from loss arithmetic.
+**Implementation:** add `align_form: "ce" | "mi" = "ce"` (CE = conditional
+entropy; MI retained for ablation). When `ce`, compute
+`d_c = _h2_joint(s2_st-part) − _h2_bits(s2_s, tr_s)` where the joint is the
+source-only-plus-cross block; wire `align_form` through `TrainConfig` and the
+dares engine. Do not change the source stop-grad anchoring.
 
-### P0 — Add dense target-domain supervision
-The gap to DACS is supervision density, not alignment quality.
+### 2.2 Dense target supervision from within the framework — Rényi-EM
 
-- Add confidence-thresholded pseudo-label self-training on the target (pixel CE
-  and/or soft Dice), with an EMA teacher producing the pseudo-labels (see P1).
-- Add ClassMix-style source/target mixing, or weak–strong augmentation
-  consistency on target images.
-- Keep the Rényi term as a complement, not the sole target signal.
-- Reference: DACS config uses `dacs_threshold: 0.968`, `dacs_mix_ratio: 0.5`
-  plus color jitter + blur — a proven recipe on this exact dataset/split.
+CREDA already computes per-pixel Rényi-2 prediction entropy for the confidence
+weight `w = 1 − Ĥ2/log C`. Turn that diagnostic into an objective:
 
-### P1 — Attack the photometric gap at the input level
-- FDA (input-space Fourier amplitude swap) alone beats DARES (0.5416 vs
-  0.4949). Add FDA-style amplitude swap or target-matched color jitter as
-  preprocessing, complementary to the deep-feature alignment.
-- Implement KimiReport Part I §4.4 multi-scale alignment: apply the alignment
-  term at an additional shallow decoder level (λ_ℓ weights), since the
-  spectral shift lives in early features.
+    L_em = mean_t( (1 − w_agg) · Ĥ2(P_t) )     over target pixels
 
-### P1 — Fix the moving anchor and the unfreeze shock
-- Use an **EMA teacher** as the alignment anchor and pseudo-label source:
-  stops pseudo-label drift and makes the anchor stable across steps (current
-  hard argmax + soft weights cannot).
-- Soften the epoch-3 unfreeze shock (all methods dip at epoch 3; DARES never
-  recovers): partial encoder unfreeze, or a lower LR for the encoder than the
-  decoder, or per-domain normalization statistics.
+i.e. entropy minimization on target predictions, weighted by the complement of
+the (optionally spatially pooled) confidence weight so genuinely ambiguous
+pixels are not forced. Same mathematical family as CDAN+E's entropy
+conditioning (the CREDA paper itself compares against it), zero borrowed
+machinery. This supplies the dense per-pixel gradient that forest recall needs.
 
-### P2 — Pseudo-label quality control (binary task)
-- Add a confidence **threshold** for membership in `T_c` (currently pure
-  argmax: confidently-wrong pixels get w ≈ 1 and are aligned onto the wrong
-  source class — confirmation bias). Suggested starting point: 0.968 (DACS).
-- In `_quota_indices`, sample **without replacement** when `n_c < M` (current
-  `torch.randint` duplicates points; κ(x,x)=1 blocks inflate purity and bias
-  Δ). Either lower M for small classes or skip replacement duplicates.
+**Implementation:** new term inside `DARESLoss.forward`, weight `lambda_em`
+(expose in config; start at 0.01–0.1, schedule-free), applied to the soft
+predictions `P_t` before argmax detach. Ablation flag `use_renyi_em`.
 
-### P2 — Cheap ablations
-- Align the **foreground class only** (ω_bg = 0, KimiReport Part I §3.3):
-  non_forest is what differs most across domains; aligning it may be
-  net-harmful.
-- Re-tune the schedule given measured λ_eff ≈ 0.01: config has
-  `grad_ratio: 0.8`, `ramp_steps: 4000`; the reference defaults are ρ = 1.0,
-  ramp 9000. Consider raising ρ and λ_max only *after* the two-sided floor is
-  in place (otherwise more λ just feeds the exploited direction).
-- **Investigate a comparison confound:** DARES and source_only run nominally
-  identical objectives during the 2 warmup epochs (λ = 0, frozen backbone, same
-  seed 42), yet epoch-2 target val is 0.4991 (DARES) vs a run-best of 0.3488
-  (source_only). Check whether data order / augmentation RNG differs by method,
-  or whether an extra forward pass changes BN statistics. If systematic, all
-  method comparisons on this benchmark are confounded and must be re-run.
+### 2.3 Let λ actually matter — ramp-only scheduling
 
-## 4. Suggested implementation order
+With the conditional form bounded by the floors, the trust region is no longer
+fighting a runaway objective. Default `trust_region: false` (config path
+already exists) so λ follows the sigmoid ramp to O(1); keep the trust region
+as an ablation safety valve. Monitor gradient norms via the (already returned)
+diagnostics instead of clamping them.
 
-1. Logging of existing diagnostics (no behavior change) + rerun baseline to
-   confirm Δ → negative over-dispersion and record H2 traces.
-2. Two-sided target entropy band (P0) — single-run ablation.
-3. EMA teacher + pseudo-label self-training + ClassMix (P0/P1) — expect the
-   bulk of the forest-recall recovery (target: recall → ≥ 0.8).
-4. FDA-style input adaptation (P1) — cheap, orthogonal.
-5. Confidence threshold + quota sampling fix (P2), foreground-only alignment
-   ablation (P2), schedule re-tune (P2).
-6. Re-run the full 5-method comparison on `LIME_stress/medium` with identical
-   seeds/augmentation after resolving the confound in P2.
+### 2.4 Principled integrity fixes (keep unconditionally)
 
-## 5. Constraints and notes for the implementing agent
+- `_quota_indices`: sample **without replacement** (no κ(x,x)=1 duplicate
+  blocks inflating purity). Engine handles variable-cardinality class sets.
+- Per-epoch logging of existing diagnostics: `h2_source_mean`,
+  `h2_target_mean`, `delta_align_mean`, `delta_repulsion_mean`, `lambda_eff`,
+  `n_valid_classes` — observability is non-negotiable.
+- `ce.py` NaN guard (zero loss when all target pixels ignored) only if needed
+  by a new term.
 
-- `src/losses/dares_loss.py` is the hardened loss module (class `DARESLoss`); the
-  trainer/criterion wiring lives elsewhere in the repo — locate it first
-  (search for `DARESLoss`, `update_lambda`, `lambda_eff`).
-- The training loop must call `crit.update_lambda(parts["loss_seg"],
-  parts["loss_aux"], ref_params)` after forward and before backward, with
-  `ref_params` = deepest shared encoder block (see module docstring §6 usage).
-- Keep the CREDA core in fp32 with autocast disabled (AMP-safe); the repo runs
-  `use_amp: true`.
-- Config keys for DARES live in `configs/LIME_stress/medium/dares.yaml`; add
-  new hyperparameters there (teacher EMA decay, pseudo-label threshold,
-  two-sided gap, FDA on/off, etc.).
-- Do not regress the three verified safeguards: entropy floors (anti-collapse),
-  margin-hinged repulsion, GradNorm-lite trust region — they work (no collapse
-  in the log); the problem is what they don't cover.
-- Success criterion: target test mIoU ≥ 0.70 on LIME_stress/medium without
-  dropping source test mIoU below source_only's 0.8885; forest recall is the
-  primary per-class metric to watch.
+## 3. Stratified evaluation (makes the claim defensible)
+
+DACS belongs to a different signal class (data mixing + dense pseudo-labels).
+Do **not** fold it in. Evaluate in tiers:
+
+- **Tier 1 (headline claim):** DARES [conditional form + Rényi-EM] vs
+  source_only, ADVENT, FDA — won by the alignment/EM term alone.
+- **Tier 2 (context):** DARES vs DACS, reported with an **ablation table**
+  isolating: align-only / EM-only / align+EM. The table is the defense.
+- If pure alignment saturates below DACS, report it as a finding: second-order
+  feature alignment saturates; prediction-space (Rényi) supervision is
+  necessary. That is publishable, not a failure.
+- **Resolve the warmup confound first:** old DARES vs source_only differed at
+  epoch 2 (0.4991 vs 0.3488) under identical λ=0 objectives. Audit data order /
+  augmentation RNG / BN statistics before any comparison run. Until resolved,
+  all method comparisons on this benchmark are suspect.
+
+## 4. Deferred (explicitly NOT in core DARES)
+
+EMA teacher, ClassMix, FDA input swap, multi-scale alignment, pseudo-label
+thresholds, schedule re-tunes. If ever wanted, they go in a clearly-labeled
+"extended" ablation (Tier 3), never in the method definition.
+
+## 5. Implementation order for the agent
+
+1. Audit & resolve the warmup confound (§3) — blocks all comparisons.
+2. `align_form = "ce"` conditional-entropy alignment (§2.1) + keep floors/
+   repulsion; run LIME_stress/medium vs Tier 1.
+3. Rényi-EM term (§2.2), `use_renyi_em` flag; ablate align/EM/both.
+4. `trust_region: false` default (§2.3); confirm λ ramps to O(1) and
+   `delta_align_mean` stays bounded (no over-dispersion exploit).
+5. No-replacement quotas + diagnostics logging (§2.4).
+6. Full Tier-1/Tier-2 comparison on LIME_stress/medium with resolved seeds;
+   success = beat ADVENT/FDA without foreign mechanisms, and a clean ablation
+   table for the DACS comparison.
+
+## 6. Constraints for the implementing agent
+
+- Loss lives in `src/dares/losses/dares_loss.py` (`DARESLoss`); trainer wiring
+  in `src/dares/engines/dares.py` (`update_lambda` called after forward, before
+  backward, `ref_params` = deepest shared encoder block).
+- Keep the CREDA core fp32 with autocast disabled (AMP-safe; repo uses
+  `use_amp: true`).
+- Do not regress the three safeguards (entropy floors, repulsion hinge, trust
+  region) — they constrain the feasible set regardless of `align_form`.
+- All changes must be ablation-flagged so each term's contribution is
+  attributable; no foreign mechanisms in the default path.

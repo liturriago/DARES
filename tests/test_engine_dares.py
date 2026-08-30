@@ -21,8 +21,11 @@ METRIC_KEYS = {
     "loss_align",
     "loss_anti_collapse",
     "loss_repulsion",
+    "loss_em",
     "h2_source_mean",
     "h2_target_mean",
+    "delta_align_mean",
+    "delta_repulsion_mean",
     "lambda_eff",
     "n_valid_classes",
     "n_rep_pairs",
@@ -100,9 +103,7 @@ def _build_fixtures(tmp_path: Path, **train_overrides):
 
 def test_fit_returns_model_and_tracks_history(tmp_path):
     """fit() returns the model and records the DARES loss history."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path
-    )
+    model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     trained = engine.fit()
@@ -118,9 +119,7 @@ def test_fit_returns_model_and_tracks_history(tmp_path):
 
 def test_train_epoch_returns_all_diagnostics(tmp_path):
     """train_epoch() returns the full DARES diagnostic set + epoch_time."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path
-    )
+    model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     metrics = engine.train_epoch()
@@ -134,16 +133,12 @@ def test_train_epoch_returns_all_diagnostics(tmp_path):
 
 def test_reference_params_are_the_deep_encoder_block(tmp_path):
     """The engine uses the deepest shared encoder block as reference params."""
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path
-    )
+    model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     expected = engine.model.backbone.reference_params
     assert len(engine.ref_params) > 0
-    assert all(
-        any(r is e for e in expected) for r in engine.ref_params
-    )
+    assert all(any(r is e for e in expected) for r in engine.ref_params)
 
 
 def test_update_lambda_warmup_zeroes_effective_lambda():
@@ -276,9 +271,7 @@ def test_scaler_update_called_after_each_step(tmp_path, monkeypatch):
     since the last update()' on the second batch. This test asserts the step /
     update ordering contract by counting calls.
     """
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path
-    )
+    model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     calls = {"step": 0, "update": 0}
@@ -314,9 +307,7 @@ def test_criterion_is_on_model_device(tmp_path):
     model and gradients were on cuda. update_lambda's GradNorm then hit
     'Expected all tensors to be on the same device' once step >= warmup_steps.
     """
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path
-    )
+    model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     model_dev = next(model.parameters()).device
@@ -338,9 +329,7 @@ def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
 
     The engine now finalizes the AMP cycle only after a real step.
     """
-    model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path
-    )
+    model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
     update_calls = []
@@ -366,3 +355,25 @@ def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
 
     assert metrics["epoch_time"] >= 0.0
     assert len(update_calls) == 0  # update() skipped alongside the skipped step
+
+
+def test_criterion_wires_align_form_and_em(tmp_path):
+    """The engine forwards align_form / EM settings into the DARESLoss."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path, align_form="mi", use_renyi_em=False, lambda_em=0.2
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    assert engine.criterion.align_form == "mi"
+    assert engine.criterion.use_renyi_em is False
+    assert engine.criterion.lambda_em == 0.2
+
+
+def test_train_config_defaults_are_headline():
+    """TrainConfig defaults select the headline CE + Renyi-EM, trust-free setup."""
+    cfg = TrainConfig(method="dares")
+
+    assert cfg.align_form == "ce"
+    assert cfg.use_renyi_em is True
+    assert cfg.lambda_em == 0.05
+    assert cfg.trust_region is False

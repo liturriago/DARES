@@ -14,10 +14,24 @@ safeguards:
      trust region: ``lambda_eff = lambda_max * s(t) * min(1, rho * g_seg/g_aux)``
      computed on the deepest shared encoder block (reference parameters).
 
+The alignment term itself is pluggable (``align_form``): the default
+``"ce"`` form uses the matrix-based Renyi-2 **conditional entropy**
+``H2(K_c^mix) - H2(K_c^s)`` (source stop-graduated), which removes the target
+over-dispersion reward of the per-class MI surrogate by construction (see
+``Docs/KimiReport.txt`` Part II Sec 1.1); ``"mi"`` retains the original
+``Delta = H2(mix) - 1/2 H2_s - 1/2 H2_t`` surrogate for ablation.
+
+A dense, prediction-space supervision term (``use_renyi_em``) minimizes the
+per-pixel Renyi-2 prediction entropy weighted by the (optionally spatially
+pooled) confidence weight ``w``, so genuinely ambiguous (low-confidence)
+pixels are down-weighted and not forced into arbitrary high-confidence
+mistakes while confident pixels are sharpened.
+
 All kernel / entropy math runs in float32 with ``autocast`` disabled (AMP-safe).
 
 Objective::
-    L = L_seg + lambda_eff * (L_align + beta * L_anti_collapse + gamma * L_repulsion)
+    L = L_seg + lambda_eff * (L_align + beta * L_anti_collapse
+                              + gamma * L_repulsion + lambda_em * L_em)
 """
 
 import math
@@ -53,6 +67,16 @@ class DARESLoss(nn.Module):
             ``False`` the alignment weight follows only the sigmoid ramp
             (``lambda_eff = lambda_max * s(t)``).
         ema_decay (float): EMA decay for the gradient-norm moving averages.
+        align_form (str): ``"ce"`` (default) computes the alignment as the
+            Renyi-2 conditional entropy ``H2(K_c^mix) - H2(K_c^s)`` with the
+            source side stop-graduated; ``"mi"`` retains the per-class MI
+            surrogate ``H2(mix) - 1/2 H2_s - 1/2 H2_t`` for ablation.
+        use_renyi_em (bool): Enable the dense Renyi-2 entropy-minimization
+            term on target predictions.
+        lambda_em (float): Schedule-free weight of the Renyi-EM term.
+        em_pool (bool): Spatially pool the confidence weight ``w`` before it
+            weights the Renyi-EM term.
+        em_pool_kernel (int): Kernel size of the optional spatial pool.
         weight_cross (bool): Also weight the cross-block ``K_st`` by target
             confidence (symmetric generalization of the paper's weighting).
         normalize_features (bool): L2-normalize the sampled feature vectors.
@@ -78,6 +102,11 @@ class DARESLoss(nn.Module):
         grad_ratio: float = 0.8,
         trust_region: bool = True,
         ema_decay: float = 0.9,
+        align_form: str = "ce",
+        use_renyi_em: bool = True,
+        lambda_em: float = 0.05,
+        em_pool: bool = False,
+        em_pool_kernel: int = 3,
         weight_cross: bool = False,
         normalize_features: bool = False,
         sigma_min: float = 1e-3,
@@ -85,6 +114,8 @@ class DARESLoss(nn.Module):
         eps: float = 1e-8,
     ) -> None:
         super().__init__()
+        if align_form not in ("ce", "mi"):
+            raise ValueError(f"align_form must be 'ce' or 'mi', got {align_form!r}")
         self.num_classes = int(num_classes)
         self.quota = int(quota)
         self.min_samples = int(min_samples)
@@ -100,6 +131,11 @@ class DARESLoss(nn.Module):
         self.grad_ratio = float(grad_ratio)
         self.trust_region = bool(trust_region)
         self.ema_decay = float(ema_decay)
+        self.align_form = align_form
+        self.use_renyi_em = bool(use_renyi_em)
+        self.lambda_em = float(lambda_em)
+        self.em_pool = bool(em_pool)
+        self.em_pool_kernel = int(em_pool_kernel)
         self.weight_cross = bool(weight_cross)
         self.normalize_features = bool(normalize_features)
         self.sigma_min = float(sigma_min)
@@ -134,14 +170,36 @@ class DARESLoss(nn.Module):
         return p.flatten(2).transpose(1, 2).reshape(-1, p.shape[1])
 
     def _quota_indices(self, mask: torch.Tensor) -> Optional[torch.Tensor]:
-        """Selects up to ``quota`` indices from a class membership mask."""
+        """Selects up to ``quota`` indices from a class membership mask.
+
+        Sampling is always *without* replacement: when ``n_c >= quota`` a random
+        subset of ``quota`` indices is drawn, and when ``n_c < quota`` every
+        available index is returned (no duplicates). Duplicating points to pad
+        to ``quota`` biases the estimator -- repeated ``kappa(x,x)=1`` entries
+        inflate the Gram-matrix purity and shift ``Delta``.
+        """
         idx = mask.nonzero(as_tuple=False).squeeze(1)
         n = idx.numel()
         if n < self.min_samples:
             return None
         if n >= self.quota:
             return idx[torch.randperm(n, device=idx.device)[: self.quota]]
-        return idx[torch.randint(0, n, (self.quota,), device=idx.device)]
+        return idx
+
+    def _spatial_pool(
+        self, w: torch.Tensor, batch: int, size: tuple[int, int]
+    ) -> torch.Tensor:
+        """Average-pools a flattened per-pixel weight over a k x k window.
+
+        ``w`` is ``(B*h*w,)``; it is reshaped to ``(B, 1, h, w)``, replicated-
+        padded and average-pooled (stride 1) so the output keeps the original
+        spatial shape before being re-flattened.
+        """
+        wmap = w.view(batch, 1, size[0], size[1])
+        pad = self.em_pool_kernel // 2
+        wmap = F.pad(wmap, (pad, pad, pad, pad), mode="replicate")
+        pooled = F.avg_pool2d(wmap, kernel_size=self.em_pool_kernel, stride=1)
+        return pooled.reshape(-1)
 
     def _median_sigma(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Median-heuristic bandwidth over the combined (detached) features."""
@@ -162,7 +220,9 @@ class DARESLoss(nn.Module):
 
     def _delta_bits(self, s2_p, tr_p, s2_q, tr_q, s2_pq):
         """Delta(P,Q) in bits from purity sums (no block matrix needed)."""
-        ptr_joint = (s2_p + s2_q + 2.0 * s2_pq) / ((tr_p + tr_q) ** 2).clamp_min(self.eps)
+        ptr_joint = (s2_p + s2_q + 2.0 * s2_pq) / ((tr_p + tr_q) ** 2).clamp_min(
+            self.eps
+        )
         ptr_p = s2_p / (tr_p * tr_p).clamp_min(self.eps)
         ptr_q = s2_q / (tr_q * tr_q).clamp_min(self.eps)
         return (
@@ -193,8 +253,8 @@ class DARESLoss(nn.Module):
         # 2) CREDA core: fp32, autocast off (AMP-safe).
         dev = feat_s.device
         with torch.autocast(device_type=dev.type, enabled=False):
-            fs = self._flat_feat(feat_s).float()                # (Ns, d)
-            ft = self._flat_feat(feat_t).float()                # (Nt, d)
+            fs = self._flat_feat(feat_s).float()  # (Ns, d)
+            ft = self._flat_feat(feat_t).float()  # (Nt, d)
             ys = self._flat_labels(labels_s, feat_s.shape[-2:])  # (Ns,)
             pt = self._flat_probs(logits_t, feat_t.shape[-2:])  # (Nt, C)
 
@@ -208,6 +268,21 @@ class DARESLoss(nn.Module):
             pl_t = pt.detach().argmax(dim=1)
 
             zero = fs.new_zeros(())
+
+            # Renyi-2 prediction entropy (bits) and the dense Renyi-EM term.
+            # Computed on the soft predictions before the argmax detach.
+            # Weighted by the confidence weight w so genuinely ambiguous
+            # (low-confidence) pixels are down-weighted, not forced.
+            h2_pred = -torch.log2(p2)  # (Nt,)
+            if self.use_renyi_em:
+                if self.em_pool:
+                    w_agg = self._spatial_pool(w_t, feat_t.shape[0], feat_t.shape[-2:])
+                else:
+                    w_agg = w_t
+                loss_em = (w_agg * h2_pred).mean()
+            else:
+                loss_em = zero
+
             align_terms, ac_terms = [], []
             t_feats, t_weights, t_sigmas = [], [], []
             h2s_list, h2t_list, dal_list = [], [], []
@@ -218,15 +293,15 @@ class DARESLoss(nn.Module):
                 if idx_s is None or idx_t is None:
                     continue
 
-                xs = fs[idx_s]                              # (M, d)
-                xt = ft[idx_t]                              # (M, d)
-                wc = w_t[idx_t]                             # (M,)
-                sig = self._median_sigma(xs, xt)            # detached
+                xs = fs[idx_s]  # (M, d)
+                xt = ft[idx_t]  # (M, d)
+                wc = w_t[idx_t]  # (M,)
+                sig = self._median_sigma(xs, xt)  # detached
 
                 K_s = self._rbf(xs, xs, sig)
                 K_t = self._rbf(xt, xt, sig)
                 Kt_w = K_t * (wc[:, None] * wc[None, :])
-                K_st = self._rbf(xs.detach(), xt, sig)      # anchor: no grad -> source
+                K_st = self._rbf(xs.detach(), xt, sig)  # anchor: no grad -> source
                 if self.weight_cross:
                     K_st = K_st * wc[None, :]
 
@@ -236,7 +311,20 @@ class DARESLoss(nn.Module):
                 tr_t = (wc * wc).sum().clamp_min(self.eps)
                 s2_st = (K_st * K_st).sum()
 
-                d_c = self._delta_bits(s2_s.detach(), tr_s.detach(), s2_t, tr_t, s2_st)
+                if self.align_form == "ce":
+                    # Conditional-entropy alignment: H2(K_c^mix) - H2(K_c^s).
+                    # The joint block mixes the (frozen) source and the target
+                    # clouds; subtracting the source entropy leaves only the
+                    # target-conditional term -- no -1/2 H2_t dispersion reward.
+                    s2_joint = s2_s.detach() + s2_t + 2.0 * s2_st
+                    tr_joint = tr_s.detach() + tr_t
+                    H_mix = self._h2_bits(s2_joint, tr_joint)
+                    H_src = self._h2_bits(s2_s.detach(), tr_s.detach())
+                    d_c = H_mix - H_src
+                else:
+                    d_c = self._delta_bits(
+                        s2_s.detach(), tr_s.detach(), s2_t, tr_t, s2_st
+                    )
 
                 H_s = self._h2_bits(s2_s, tr_s)
                 H_t = self._h2_bits(s2_t, tr_t)
@@ -256,9 +344,18 @@ class DARESLoss(nn.Module):
             loss_ac = torch.stack(ac_terms).mean() if ac_terms else zero
 
             # 3) Inter-class target repulsion (batched over class pairs).
+            #    Classes are sampled without replacement so their cardinalities
+            #    may differ; pad to the max cardinality with zero features AND
+            #    zero weights so the batched cdist stays differentiable and the
+            #    padded entries vanish (zero weights zero the kernel).
             if len(t_feats) >= 2:
-                Xt = torch.stack(t_feats)                    # (Cv, M, d)
-                Wt = torch.stack(t_weights)                  # (Cv, M)
+                M_max = max(tf.shape[0] for tf in t_feats)
+                Xt = torch.stack(
+                    [F.pad(tf, (0, 0, 0, M_max - tf.shape[0])) for tf in t_feats]
+                )
+                Wt = torch.stack(
+                    [F.pad(wf, (0, M_max - wf.shape[0])) for wf in t_weights]
+                )
                 sig_r = torch.stack(t_sigmas).mean().detach()
 
                 D2 = torch.cdist(Xt.unsqueeze(1), Xt.unsqueeze(0), p=2.0) ** 2
@@ -266,9 +363,9 @@ class DARESLoss(nn.Module):
                 Wij = Wt[:, None, :, None] * Wt[None, :, None, :]
                 Kw = K * Wij
 
-                s2 = (Kw * Kw).sum(dim=(2, 3))               # (Cv, Cv)
+                s2 = (Kw * Kw).sum(dim=(2, 3))  # (Cv, Cv)
                 trv = (Wt * Wt).sum(dim=1).clamp_min(self.eps)  # (Cv,)
-                s2d = torch.diagonal(s2)                     # (Cv,)
+                s2d = torch.diagonal(s2)  # (Cv,)
 
                 ptr_joint = (s2d[:, None] + s2d[None, :] + 2.0 * s2) / (
                     (trv[:, None] + trv[None, :]) ** 2
@@ -295,8 +392,9 @@ class DARESLoss(nn.Module):
 
         # float(): lambda_eff is a scheduled scalar, not a graph node; using the
         # buffer tensor directly would break backward when update_lambda mutates
-        # it in place between forward and backward.
-        total = loss_seg + float(self.lambda_eff) * loss_aux
+        # it in place between forward and backward. The Renyi-EM term carries a
+        # schedule-free weight (``lambda_em``) outside the ramped alignment.
+        total = loss_seg + float(self.lambda_eff) * loss_aux + self.lambda_em * loss_em
 
         parts = {
             "total": total,
@@ -305,6 +403,7 @@ class DARESLoss(nn.Module):
             "loss_align": loss_align.detach(),
             "loss_anti_collapse": loss_ac.detach(),
             "loss_repulsion": loss_rep.detach(),
+            "loss_em": loss_em.detach(),
             "h2_source_mean": torch.stack(h2s_list).mean() if h2s_list else zero,
             "h2_target_mean": torch.stack(h2t_list).mean() if h2t_list else zero,
             "delta_align_mean": torch.stack(dal_list).mean() if dal_list else zero,
@@ -314,6 +413,16 @@ class DARESLoss(nn.Module):
             "n_rep_pairs": torch.tensor(n_pairs, device=dev),
         }
         return total, parts
+
+    # ---------------------------------------------------------------- warmup
+    def in_warmup(self) -> bool:
+        """Whether the per-step schedule is still in its source-only phase.
+
+        Returns:
+            bool: ``True`` while ``step < warmup_steps`` (``lambda_eff`` stays
+                zero and no target data should be consumed).
+        """
+        return int(self.step.item()) < self.warmup_steps
 
     # -------------------------------------------------------- trust region
     def update_lambda(
@@ -345,7 +454,9 @@ class DARESLoss(nn.Module):
             return 0.0
 
         p = min(1.0, (t - self.warmup_steps) / max(1, self.ramp_steps))
-        s = (1.0 - math.exp(-self.ramp_delta * p)) / (1.0 + math.exp(-self.ramp_delta * p))
+        s = (1.0 - math.exp(-self.ramp_delta * p)) / (
+            1.0 + math.exp(-self.ramp_delta * p)
+        )
 
         if not self.trust_region:
             lam = float(self.lambda_max * s)
@@ -376,7 +487,9 @@ class DARESLoss(nn.Module):
         self.ema_g_seg.mul_(d).add_((1.0 - d) * ns)
         self.ema_g_aux.mul_(d).add_((1.0 - d) * na)
 
-        ratio = (self.grad_ratio * self.ema_g_seg / (self.ema_g_aux + self.eps)).clamp(max=1.0)
+        ratio = (self.grad_ratio * self.ema_g_seg / (self.ema_g_aux + self.eps)).clamp(
+            max=1.0
+        )
         lam = float(self.lambda_max * s * ratio.item())
         self.lambda_eff.fill_(lam)
         return lam

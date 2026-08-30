@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 from scripts.evaluate import main as evaluate_main  # noqa: E402
 from scripts.train import main as train_main  # noqa: E402
 
+
 def make_h5(
     file_path: Path, num_patches: int = 6, height: int = 64, width: int = 64
 ) -> None:
@@ -189,9 +190,28 @@ def test_config_matrix_complete_and_valid():
     # 3. ablation: convnext_tiny_resunet, medium, one DARES component off each.
     ablation_dir = configs_root / "ablation"
     expected_ablations = {
-        "dares_no_anti_collapse": {"beta": 0.0, "repulsion_gamma": 0.5, "trust_region": True},
-        "dares_no_repulsion": {"beta": 1.0, "repulsion_gamma": 0.0, "trust_region": True},
-        "dares_no_trust_region": {"beta": 1.0, "repulsion_gamma": 0.5, "trust_region": False},
+        "dares_no_anti_collapse": {
+            "beta": 0.0,
+            "repulsion_gamma": 0.5,
+            "trust_region": False,
+        },
+        "dares_no_repulsion": {
+            "beta": 1.0,
+            "repulsion_gamma": 0.0,
+            "trust_region": False,
+        },
+        "dares_no_trust_region": {
+            "beta": 1.0,
+            "repulsion_gamma": 0.5,
+            "trust_region": False,
+        },
+        "dares_align_only": {
+            "align_form": "ce",
+            "use_renyi_em": False,
+            "lambda_max": 1.0,
+        },
+        "dares_em_only": {"align_form": "ce", "use_renyi_em": True, "lambda_max": 0.0},
+        "dares_align_mi": {"align_form": "mi", "use_renyi_em": True, "lambda_max": 1.0},
     }
     for name, params in expected_ablations.items():
         path = ablation_dir / f"{name}.yaml"
@@ -201,9 +221,14 @@ def test_config_matrix_complete_and_valid():
         assert cfg.model.head == "resunet"
         assert cfg.data.target_variant == "medium"
         assert cfg.training.method == "dares"
-        assert cfg.training.beta == params["beta"]
-        assert cfg.training.repulsion_gamma == params["repulsion_gamma"]
-        assert cfg.training.trust_region == params["trust_region"]
         assert cfg.experiment.output_dir == Path(
             f"outputs/ablation/{name}/experiment_1"
         )
+        if "beta" in params:
+            assert cfg.training.beta == params["beta"]
+            assert cfg.training.repulsion_gamma == params["repulsion_gamma"]
+            assert cfg.training.trust_region == params["trust_region"]
+        else:
+            assert cfg.training.align_form == params["align_form"]
+            assert cfg.training.use_renyi_em == params["use_renyi_em"]
+            assert cfg.training.lambda_max == params["lambda_max"]

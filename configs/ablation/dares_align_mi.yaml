@@ -38,11 +38,11 @@ training:
   grad_ratio: 0.8
   trust_region: false
   ema_decay: 0.9
-  align_form: "ce"
+  align_form: "mi"
   use_renyi_em: true
   lambda_em: 0.05
 experiment:
-  name: "convnext_resunet_medium_dares"
+  name: "dares_align_mi"
   version: 1
-  output_dir: "outputs/LIME_stress/medium/dares/experiment_1"
+  output_dir: "outputs/ablation/dares_align_mi/experiment_1"
   save_results: true

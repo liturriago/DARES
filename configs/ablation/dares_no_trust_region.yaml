@@ -38,6 +38,9 @@ training:
   grad_ratio: 0.8
   trust_region: false
   ema_decay: 0.9
+  align_form: "ce"
+  use_renyi_em: true
+  lambda_em: 0.05
 experiment:
   name: "dares_no_trust_region"
   version: 1
