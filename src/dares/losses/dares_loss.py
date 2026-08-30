@@ -53,6 +53,16 @@ class DARESLoss(nn.Module):
             ``False`` the alignment weight follows only the sigmoid ramp
             (``lambda_eff = lambda_max * s(t)``).
         ema_decay (float): EMA decay for the gradient-norm moving averages.
+        two_sided_gap (bool): Make the target entropy constraint a two-sided
+            band around the source entropy. When ``True`` the anti-collapse
+            term penalizes both ``H2_target < H2_source - gap`` (collapse) and
+            ``H2_target > H2_source + gap`` (over-dispersion), closing the
+            free-lunch direction the Rényi estimator can exploit by inflating
+            target dispersion.
+        pl_threshold (float): Confidence threshold for target-class membership:
+            a target pixel joins ``T_c`` only if its top-1 probability exceeds
+            this value (otherwise pure argmax can align confidently-wrong
+            pixels onto the wrong source class). ``0.0`` disables the filter.
         weight_cross (bool): Also weight the cross-block ``K_st`` by target
             confidence (symmetric generalization of the paper's weighting).
         normalize_features (bool): L2-normalize the sampled feature vectors.
@@ -78,6 +88,8 @@ class DARESLoss(nn.Module):
         grad_ratio: float = 0.8,
         trust_region: bool = True,
         ema_decay: float = 0.9,
+        two_sided_gap: bool = True,
+        pl_threshold: float = 0.0,
         weight_cross: bool = False,
         normalize_features: bool = False,
         sigma_min: float = 1e-3,
@@ -100,6 +112,8 @@ class DARESLoss(nn.Module):
         self.grad_ratio = float(grad_ratio)
         self.trust_region = bool(trust_region)
         self.ema_decay = float(ema_decay)
+        self.two_sided_gap = bool(two_sided_gap)
+        self.pl_threshold = float(pl_threshold)
         self.weight_cross = bool(weight_cross)
         self.normalize_features = bool(normalize_features)
         self.sigma_min = float(sigma_min)
@@ -134,14 +148,21 @@ class DARESLoss(nn.Module):
         return p.flatten(2).transpose(1, 2).reshape(-1, p.shape[1])
 
     def _quota_indices(self, mask: torch.Tensor) -> Optional[torch.Tensor]:
-        """Selects up to ``quota`` indices from a class membership mask."""
+        """Selects up to ``quota`` indices from a class membership mask.
+
+        Sampling is always *without* replacement: when ``n_c >= quota`` a random
+        subset of ``quota`` indices is drawn, and when ``n_c < quota`` every
+        available index is returned (no duplicates). Duplicating points to pad
+        to ``quota`` biases the estimator — repeated ``kappa(x,x)=1`` entries
+        inflate the Gram-matrix purity and shift ``Delta``.
+        """
         idx = mask.nonzero(as_tuple=False).squeeze(1)
         n = idx.numel()
         if n < self.min_samples:
             return None
         if n >= self.quota:
             return idx[torch.randperm(n, device=idx.device)[: self.quota]]
-        return idx[torch.randint(0, n, (self.quota,), device=idx.device)]
+        return idx
 
     def _median_sigma(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Median-heuristic bandwidth over the combined (detached) features."""
@@ -206,15 +227,18 @@ class DARESLoss(nn.Module):
             p2 = (pt * pt).sum(dim=1).clamp_min(self.eps)
             w_t = (1.0 + torch.log2(p2) / math.log2(C)).clamp(0.0, 1.0)
             pl_t = pt.detach().argmax(dim=1)
+            conf_t = pt.detach().max(dim=1).values
+            conf_ok = conf_t > self.pl_threshold
 
             zero = fs.new_zeros(())
             align_terms, ac_terms = [], []
             t_feats, t_weights, t_sigmas = [], [], []
+            t_s2, t_tr = [], []
             h2s_list, h2t_list, dal_list = [], [], []
 
             for c in range(C):
                 idx_s = self._quota_indices(ys == c)
-                idx_t = self._quota_indices(pl_t == c)
+                idx_t = self._quota_indices((pl_t == c) & conf_ok)
                 if idx_s is None or idx_t is None:
                     continue
 
@@ -241,13 +265,20 @@ class DARESLoss(nn.Module):
                 H_s = self._h2_bits(s2_s, tr_s)
                 H_t = self._h2_bits(s2_t, tr_t)
                 floor_s = F.relu(H_s.new_tensor(self.eta_floor) - H_s)
-                floor_t = F.relu(H_s.detach() - self.entropy_gap - H_t)
+                floor_low = F.relu(H_s.detach() - self.entropy_gap - H_t)
+                floor_high = (
+                    F.relu(H_t - H_s.detach() - self.entropy_gap)
+                    if self.two_sided_gap
+                    else zero
+                )
 
                 align_terms.append(d_c)
-                ac_terms.append(floor_s + floor_t)
+                ac_terms.append(floor_s + floor_low + floor_high)
                 t_feats.append(xt)
                 t_weights.append(wc)
                 t_sigmas.append(sig)
+                t_s2.append(s2_t)
+                t_tr.append(tr_t)
                 h2s_list.append(H_s.detach())
                 h2t_list.append(H_t.detach())
                 dal_list.append(d_c.detach())
@@ -255,34 +286,26 @@ class DARESLoss(nn.Module):
             loss_align = torch.stack(align_terms).mean() if align_terms else zero
             loss_ac = torch.stack(ac_terms).mean() if ac_terms else zero
 
-            # 3) Inter-class target repulsion (batched over class pairs).
+            # 3) Inter-class target repulsion (pairwise over class pairs).
+            #    Computed per pair so classes sampled without replacement (and
+            #    therefore of different cardinalities) are handled exactly.
             if len(t_feats) >= 2:
-                Xt = torch.stack(t_feats)                    # (Cv, M, d)
-                Wt = torch.stack(t_weights)                  # (Cv, M)
-                sig_r = torch.stack(t_sigmas).mean().detach()
-
-                D2 = torch.cdist(Xt.unsqueeze(1), Xt.unsqueeze(0), p=2.0) ** 2
-                K = torch.exp(-D2 / (2.0 * sig_r * sig_r + self.eps))
-                Wij = Wt[:, None, :, None] * Wt[None, :, None, :]
-                Kw = K * Wij
-
-                s2 = (Kw * Kw).sum(dim=(2, 3))               # (Cv, Cv)
-                trv = (Wt * Wt).sum(dim=1).clamp_min(self.eps)  # (Cv,)
-                s2d = torch.diagonal(s2)                     # (Cv,)
-
-                ptr_joint = (s2d[:, None] + s2d[None, :] + 2.0 * s2) / (
-                    (trv[:, None] + trv[None, :]) ** 2
-                ).clamp_min(self.eps)
-                ptr_m = s2d / (trv * trv).clamp_min(self.eps)
-                Dmat = (
-                    -torch.log(ptr_joint.clamp_min(self.eps))
-                    + 0.5 * torch.log(ptr_m[:, None].clamp_min(self.eps))
-                    + 0.5 * torch.log(ptr_m[None, :].clamp_min(self.eps))
-                ) / _LN2
-
-                Cv = Xt.shape[0]
-                iu = torch.triu_indices(Cv, Cv, offset=1, device=Dmat.device)
-                deltas = Dmat[iu[0], iu[1]]
+                rep_deltas: list[torch.Tensor] = []
+                Cv = len(t_feats)
+                for a in range(Cv):
+                    for b in range(a + 1, Cv):
+                        sig_ab = ((t_sigmas[a] + t_sigmas[b]) / 2.0).detach()
+                        Kab = self._rbf(t_feats[a], t_feats[b], sig_ab)
+                        Kab_w = Kab * (
+                            t_weights[a][:, None] * t_weights[b][None, :]
+                        )
+                        s2_ab = (Kab_w * Kab_w).sum()
+                        rep_deltas.append(
+                            self._delta_bits(
+                                t_s2[a], t_tr[a], t_s2[b], t_tr[b], s2_ab
+                            )
+                        )
+                deltas = torch.stack(rep_deltas)
                 loss_rep = F.relu(self.repulsion_margin - deltas).mean()
                 rep_mean = deltas.detach().mean()
                 n_pairs = int(deltas.numel())

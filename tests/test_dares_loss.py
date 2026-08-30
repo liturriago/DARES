@@ -180,3 +180,74 @@ def test_step_counter_is_monotonic_across_update_lambda():
         crit.update_lambda(out.sum(), (out * 0.5).sum(), [p])
 
     assert int(crit.step.item()) == base + 5
+
+
+def _over_dispersed(seed=0, scale_s=1.0, scale_t=3.0):
+    torch.manual_seed(seed)
+    n, h, w, d = 2, 16, 16, 8
+    fs = torch.randn(n, d, h, w) * scale_s
+    ft = torch.randn(n, d, h, w) * scale_t
+    ls = torch.ones(n, h, w, dtype=torch.long)
+    logits_s = torch.randn(n, 2, h, w)
+    logits_t = torch.randn(n, 2, h, w)
+    logits_t[:, 1] += 5.0  # confident class-1 pseudo-labels
+    return fs, ft, ls, logits_s, logits_t
+
+
+def test_two_sided_gap_penalizes_over_dispersion():
+    """Over-dispersed target (H2_t > H2_s + gap) activates the upper band."""
+    crit = DARESLoss(
+        num_classes=2, warmup_steps=0, eta_floor=0.0,
+        entropy_gap=0.25, two_sided_gap=True,
+    )
+    fs, ft, ls, logits_s, logits_t = _over_dispersed()
+    _, parts = crit(fs, logits_s, ls, ft, logits_t)
+
+    assert parts["h2_target_mean"].item() > parts["h2_source_mean"].item() + 0.25
+    assert parts["loss_anti_collapse"].item() > 0.0
+
+
+def test_two_sided_gap_disabled_leaves_over_dispersion_unpenalized():
+    """With the upper band off, over-dispersion adds no anti-collapse penalty."""
+    crit = DARESLoss(
+        num_classes=2, warmup_steps=0, eta_floor=0.0,
+        entropy_gap=0.25, two_sided_gap=False,
+    )
+    fs, ft, ls, logits_s, logits_t = _over_dispersed()
+    _, parts = crit(fs, logits_s, ls, ft, logits_t)
+
+    assert parts["loss_anti_collapse"].item() < 1e-6
+
+
+def test_confidence_threshold_filters_target_membership():
+    """Low-confidence target pixels are excluded from T_c (no class passes)."""
+    crit = DARESLoss(
+        num_classes=2, warmup_steps=0, pl_threshold=0.9, min_samples=8
+    )
+    n, h, w, d = 2, 16, 16, 8
+    fs = torch.randn(n, d, h, w)
+    ft = torch.randn(n, d, h, w)
+    ls = torch.ones(n, h, w, dtype=torch.long)
+    logits_s = torch.randn(n, 2, h, w)
+    logits_t = torch.zeros(n, 2, h, w)  # max prob 0.5 < 0.9 everywhere
+
+    total, parts = crit(fs, logits_s, ls, ft, logits_t)
+
+    assert torch.isfinite(total)
+    assert parts["n_valid_classes"].item() == 0
+
+
+def test_quota_sampling_without_replacement():
+    """Small classes return all their pixels (no duplicate padding)."""
+    crit = DARESLoss(num_classes=2, quota=100, min_samples=8)
+    mask = torch.zeros(60, dtype=torch.bool)
+    mask[:20] = True
+    idx = crit._quota_indices(mask)
+
+    assert idx.numel() == 20
+    assert idx.unique().numel() == 20  # no duplicates
+
+    mask2 = torch.ones(200, dtype=torch.bool)
+    idx2 = crit._quota_indices(mask2)
+    assert idx2.numel() == 100
+    assert idx2.unique().numel() == 100

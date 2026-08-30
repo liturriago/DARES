@@ -21,11 +21,16 @@ METRIC_KEYS = {
     "loss_align",
     "loss_anti_collapse",
     "loss_repulsion",
+    "loss_pl",
+    "loss_mix",
     "h2_source_mean",
     "h2_target_mean",
+    "delta_align_mean",
+    "delta_repulsion_mean",
     "lambda_eff",
     "n_valid_classes",
     "n_rep_pairs",
+    "pseudo_conf",
     "epoch_time",
 }
 
@@ -127,7 +132,7 @@ def test_train_epoch_returns_all_diagnostics(tmp_path):
 
     assert set(metrics) == METRIC_KEYS
     for key, value in metrics.items():
-        if key != "loss_repulsion":
+        if key not in ("loss_repulsion", "delta_repulsion_mean"):
             assert math.isfinite(value), key
     assert metrics["epoch_time"] >= 0.0
 
@@ -366,3 +371,63 @@ def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
 
     assert metrics["epoch_time"] >= 0.0
     assert len(update_calls) == 0  # update() skipped alongside the skipped step
+
+
+def test_ema_teacher_is_eval_and_frozen(tmp_path):
+    """The EMA teacher is a distinct, frozen, eval-mode copy of the student."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    assert engine.teacher is not engine.model
+    assert not engine.teacher.training
+    assert all(not p.requires_grad for p in engine.teacher.parameters())
+    for tp, sp in zip(engine.teacher.parameters(), engine.model.parameters()):
+        assert torch.equal(tp.data, sp.data)
+
+
+def test_teacher_updates_toward_student_after_training(tmp_path):
+    """After training the EMA teacher diverges from the (moved) student."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    engine.fit()
+
+    moved = any(
+        not torch.equal(tp.data, sp.data)
+        for tp, sp in zip(engine.teacher.parameters(), engine.model.parameters())
+    )
+    assert moved
+
+
+def test_self_training_and_classmix_finite(tmp_path):
+    """Pseudo-label CE and ClassMix terms stay finite in a training epoch."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+
+    metrics = engine.train_epoch()
+
+    assert math.isfinite(metrics["loss_pl"])
+    assert math.isfinite(metrics["loss_mix"])
+    assert 0.0 <= metrics["pseudo_conf"] <= 1.0
+
+
+def test_pseudo_labels_are_thresholded(tmp_path):
+    """_pseudo_labels returns an int64 mask in {0, 1, 255} with confidences."""
+    model, source_loaders, target_loaders, config, device = _build_fixtures(
+        tmp_path
+    )
+    engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
+    imgs_t = next(iter(target_loaders["train"]))[0].to(device)
+
+    pseudo, conf = engine._pseudo_labels(imgs_t)
+
+    assert pseudo.dtype == torch.int64
+    assert pseudo.shape == conf.shape
+    assert torch.all((pseudo == 0) | (pseudo == 1) | (pseudo == 255))
+    assert torch.all((conf >= 0.0) & (conf <= 1.0))
