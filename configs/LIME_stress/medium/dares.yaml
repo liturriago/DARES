@@ -10,7 +10,7 @@ data:
   use_augmentation: true
 
 model:
-  backbone: "convnext_tiny"
+  backbone: "resnet50"
   head: "resunet"
   in_channels: 4
   num_classes: 2
@@ -33,7 +33,7 @@ training:
   min_samples: 8
 
   # Ponderación y rampas de alineación
-  lambda_max: 5.0
+  lambda_max: 10.0
   warmup_steps: 1000
   ramp_steps: 4000
   ramp_delta: 10.0
