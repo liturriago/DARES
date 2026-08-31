@@ -102,11 +102,17 @@ class TrainConfig(BaseModel):
     em_pool_kernel: int = Field(default=3, gt=0)
 
     # Method selection
-    method: Literal["source_only", "advent", "dacs", "fda", "dares"] = "dares"
+    method: Literal["source_only", "advent", "cbst", "dacs", "fda", "dares"] = "dares"
 
     # ADVENT
     lambda_adv: float = Field(default=0.1, ge=0.0)
     lambda_entropy: float = Field(default=0.1, ge=0.0)
+
+    # CBST
+    lambda_self: float = Field(default=1.0, ge=0.0)
+    pseudo_threshold: float = Field(default=0.9, gt=0.0, le=1.0)
+    pseudo_topk_ratio: float = Field(default=0.5, gt=0.0, le=1.0)
+    n_self_training_rounds: int = Field(default=1, ge=1)
 
     # DACS
     dacs_threshold: float = Field(default=0.968, gt=0.0, le=1.0)

@@ -5,14 +5,14 @@
 
 Unsupervised Domain Adaptation (UDA) framework for **dense semantic segmentation** applied to tropical rainforest **deforestation mapping**.
 
-DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Brazilian Amazon (São Félix do Xingu, PRODES) to **Landsat-8** imagery over the Colombian Amazon (San José del Guaviare / Caquetá forest reserves), under simultaneous **geographic** and **cross-sensor** domain shift. The method extends the Conditional Rényi α-Entropy Domain Adaptation (CREDA) framework [1] to dense prediction tasks via a novel **Spatially-Stratified, Confidence-Guided Sampling operator** (Φ_c) that makes Gram-matrix computation tractable at pixel level.
+DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Brazilian Amazon (São Félix do Xingu, PRODES) to **Landsat-8** imagery over the Colombian Amazon (San José del Guaviare / Caquetá forest reserves), under simultaneous **geographic** and **cross-sensor** domain shift. The method extends the Conditional Rényi α-Entropy Domain Adaptation (CREDA) framework to dense prediction tasks via a novel **Spatially-Stratified, Confidence-Guided Sampling operator** (Φ_c) that makes Gram-matrix computation tractable at pixel level.
 
 ## Features
 
-- **Five UDA methods** under one shared training interface: Source-Only baseline, ADVENT, DACS, FDA and **DARES** (the proposed α-Rényi alignment).
+- **Six UDA methods** under one shared training interface: Source-Only baseline, ADVENT, CBST, DACS, FDA and **DARES** (the proposed α-Rényi alignment).
 - **Pluggable architecture matrix:** backbones (ResNet50, ConvNeXt-Tiny, Swin-T) × segmentation heads (ResUNet decoder, DeepLabV3+ ASPP).
-- **DARES core loss (DARESLoss):** hardened class-conditional order-2 Rényi alignment over Gaussian Gram matrices with median-heuristic kernel bandwidth, per-pixel Rényi-2 confidence weighting, anti-collapse spectral entropy floors (`H2 ≥ η`), margin-hinged inter-class target repulsion, and a per-step GradNorm-lite trust region on the deepest encoder block.
-- **CREDA dynamic alignment schedule:** the Rényi weight follows the per-step sigmoid ramp `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` (CREDA Eq. 29 + GradNorm-lite EMA), so the alignment ramps in smoothly and can never dominate the supervised gradient.
+- **DARES core loss (DARESLoss):** hardened class-conditional order-2 Rényi alignment over Gaussian Gram matrices with median-heuristic kernel bandwidth, per-pixel Rényi-2 confidence weighting, anti-collapse spectral entropy floors (`H2 ≥ η`), margin-hinged inter-class target repulsion, a per-step GradNorm-lite trust region on the deepest encoder block, and a dense Rényi-EM regularization term (`L_em`) on confident target predictions.
+- **CREDA dynamic alignment schedule:** the Rényi weight follows the per-step sigmoid ramp `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` (CREDA + GradNorm-lite EMA), so the alignment ramps in smoothly and can never dominate the supervised gradient.
 - **HDF5 data pipeline** (`float32` 4-band patches, LZF compression) with lazy, worker-safe dataset loading.
 - **Segmentation metrics:** per-class and mean IoU, DICE (F1), Overall Accuracy, MCC, plus per-class precision/recall.
 - **Config-driven experiments:** every method/architecture combination is a YAML file; single CLI entry points for train and evaluate.
@@ -24,9 +24,9 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 | --- | --- | --- |
 | `source_only` | Baseline | Supervised CE on source only (adaptation gap reference). |
 | `advent` | Adversarial | Entropy-map domain discriminator + target entropy minimization. |
-| `dacs` | Self-training | Cross-domain mixed sampling (ClassMix) with pseudo-labels, color jitter and Gaussian blur. |
+| `cbst` | Self-training | Class-balanced self-training: per-class top-ratio pseudo-label selection + masked CE on target. |
 | `fda` | Spectral alignment | Fourier low-frequency amplitude swap + Charbonnier entropy minimization. |
-| `dares` | Info-theoretic | `L = L_seg + λ_eff·(L_align + β·L_ac + γ·L_rep)` — hardened DARES class-conditional Rényi alignment with anti-collapse entropy floors, margin-hinged target repulsion and a per-step gradient trust region `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)`. |
+| `dares` | Info-theoretic | `L = L_seg + λ_eff·(L_align + β·L_ac + γ·L_rep) + λ_em·L_em` — hardened DARES class-conditional Rényi alignment with anti-collapse entropy floors, margin-hinged target repulsion, a per-step gradient trust region `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` and dense Rényi-EM regularization. |
 
 ## Installation
 
@@ -68,7 +68,7 @@ Experiments are fully described by a YAML file, organized in three folders:
 
 ```
 configs/
-├── LIME_stress/            # ConvNeXt-ResUNet × 5 methods × {low, medium, high} LIME tiers
+├── LIME_stress/            # ResNet-50 + ResUNet × 6 methods × {low, medium, high} LIME tiers
 │   ├── low/
 │   ├── medium/
 │   └── high/
@@ -78,11 +78,16 @@ configs/
 │   ├── convnext_tiny_deeplabv3p/
 │   ├── swin_t_resunet/
 │   └── swin_t_deeplabv3p/
-└── ablation/               # DARES with one component disabled (medium, ConvNeXt-ResUNet)
+└── ablation/               # DARES with one component disabled (medium, ResNet-50 + ResUNet)
     ├── dares_no_anti_collapse.yaml
     ├── dares_no_repulsion.yaml
-    └── dares_no_trust_region.yaml
+    ├── dares_no_trust_region.yaml
+    ├── dares_align_only.yaml
+    ├── dares_em_only.yaml
+    └── dares_align_mi.yaml
 ```
+
+`configs/LIME_stress/medium/dares.yaml` is the **DARES reference (headline) setup**. All other DARES configs (LIME tiers and architectures) share its exact training block and change only their target tier or model architecture; the ablation configs reuse it with exactly one safeguard switched off (see the comments in each file).
 
 Example (`configs/LIME_stress/medium/dares.yaml`):
 
@@ -90,41 +95,61 @@ Example (`configs/LIME_stress/medium/dares.yaml`):
 data:
   source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
   target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Medium"
-  target_variant: medium       # original | low | medium | high (selects target container naming)
+  target_variant: "medium"       # original | low | medium | high (selects target container naming)
   batch_size: 8
   patch_size: 224
   num_workers: 4
+  mean: [0.0, 0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0, 1.0]
+  use_augmentation: true
 
 model:
-  backbone: "convnext_tiny"
+  backbone: "resnet50"
   head: "resunet"
   in_channels: 4          # B2, B3, B4, B8
   num_classes: 2          # non_forest / forest
   pretrained: true
+  dropout_rate: 0.1
 
 training:
   method: "dares"
   epochs: 25
   lr: 0.0001
+  weight_decay: 0.00001
+  gamma: 0.94             # per-epoch multiplicative LR decay (DARESScheduler)
+  use_amp: true
   device: "cuda"
-  quota: 256            # M — pixels sampled per class per batch
-  min_samples: 8        # tau — class must have >= this many pixels
-  lambda_max: 1.0       # peak alignment weight
-  beta: 1.0             # anti-collapse term weight
-  repulsion_gamma: 0.5  # inter-class repulsion term weight
-  eta_floor: 1.0        # absolute H2 (bits) floor for source classes
-  entropy_gap: 0.25     # target must stay within gap of source H2 (bits)
-  repulsion_margin: 0.2 # hinge margin m (bits) for target repulsion
-  warmup_steps: 1000    # steps with lambda_eff = 0 (source-only warm-up)
-  ramp_steps: 4000      # sigmoid ramp length (steps)
-  ramp_delta: 10.0      # sigmoid steepness
-  grad_ratio: 0.8       # rho — max ||g_aux||/||g_seg|| trust-region cap
-  trust_region: true    # GradNorm-lite trust region (set false to ablate)
-  ema_decay: 0.9        # EMA decay for gradient norms
+  seed: 42
+  warmup_epochs: 2
+
+  quota: 256              # M — pixels sampled per class per batch
+  min_samples: 8          # tau — class must have >= this many pixels
+  lambda_max: 10.0        # peak alignment weight (DARES reference value)
+  warmup_steps: 1000      # steps with lambda_eff = 0 (source-only warm-up)
+  ramp_steps: 4000        # sigmoid ramp length (steps)
+  ramp_delta: 10.0        # sigmoid steepness
+
+  beta: 1.0               # anti-collapse term weight (L_ac)
+  repulsion_gamma: 0.5    # inter-class repulsion term weight (L_rep)
+  eta_floor: 1.0          # absolute H2 (bits) floor for source classes
+  entropy_gap: 0.25       # target must stay within gap of source H2 (bits)
+  repulsion_margin: 0.2   # hinge margin m (bits) for target repulsion
+
+  trust_region: true      # GradNorm-lite trust region (set false to ablate)
+  grad_ratio: 0.8         # rho — max ||g_aux||/||g_seg|| trust-region cap
+  ema_decay: 0.9          # EMA decay for gradient norms
+  align_form: "mi"        # mi | ce — symmetric normalized divergence
+
+  use_renyi_em: true      # dense Rényi-EM regularization on target predictions
+  lambda_em: 0.05         # EM weight (decoupled from the alignment weight)
+  em_pool: false          # spatial pooling of the confidence map
+  em_pool_kernel: 3
 
 experiment:
-  name: "convnext_resunet_medium_dares"
+  name: "resnet50_resunet_medium_dares"
+  version: 1
   output_dir: "outputs/LIME_stress/medium/dares/experiment_1"
+  save_results: true
 ```
 
 ## Usage
@@ -196,8 +221,8 @@ src/dares/
 ├── config.py            # Pydantic configs (data / model / training / experiment)
 ├── data/                # HDF5Dataset, pair transforms, collate, DARESDataLoader
 ├── models/              # backbones (resnet50, convnext, swin) + heads (resunet, deeplabv3p) + SegmentationModel
-├── losses/              # CE, domain (discriminator), advent, dacs, fda, dares_loss (DARES)
-├── engines/             # source_only, advent, dacs, fda, dares trainers + registry
+├── losses/              # CE, domain (discriminator), advent, cbst, fda, dares_loss (DARES)
+├── engines/             # source_only, advent, cbst, fda, dares trainers + registry
 ├── training/            # BaseTrainer (AMP, evaluation, checkpointing, fit loop)
 └── utils/               # metrics (mIoU/DICE/OA/MCC), evaluation, visualizer, reproducibility
 scripts/                 # train.py, evaluate.py, check_data.py

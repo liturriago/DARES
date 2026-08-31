@@ -8,6 +8,7 @@ loop). Available methods:
 
 * ``source_only``  ->  supervised cross-entropy baseline (no adaptation).
 * ``advent``       ->  adversarial entropy minimization.
+* ``cbst``         ->  class-balanced self-training with pseudo-labels.
 * ``dacs``         ->  cross-domain mixed sampling self-training.
 * ``fda``          ->  Fourier Domain Adaptation (spectral amplitude swap).
 * ``dares``        ->  Domain Adaptation via alpha-Renyi Entropy.

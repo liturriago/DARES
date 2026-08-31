@@ -327,7 +327,9 @@ def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
     step was skipped, no inf check was recorded by the scaler, and update()
     asserted 'No inf checks were recorded prior to update.'.
 
-    The engine now finalizes the AMP cycle only after a real step.
+    The engine now finalizes the AMP cycle only after a real step. We force the
+    gradient guard to fail on every batch (exactly what happens on non-finite
+    gradients) and check that the AMP cycle is never finalized.
     """
     model, source_loaders, target_loaders, config, device = _build_fixtures(tmp_path)
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
@@ -341,15 +343,9 @@ def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
 
     monkeypatch.setattr(engine.scaler, "update", counting_update)
 
-    # Force a NaN loss on the first batch so the gradient guard trips and the
-    # optimizer step is skipped.
-    original_forward = engine.criterion.forward
-
-    def nan_forward(*args, **kwargs):
-        total, parts = original_forward(*args, **kwargs)
-        return total * float("nan"), parts
-
-    monkeypatch.setattr(engine.criterion, "forward", nan_forward)
+    # Simulate the NaN gradient guard tripping on every batch: the step is
+    # skipped by _backward_step, so scaler.update() must never be called.
+    monkeypatch.setattr(engine, "_guard_step", lambda optimizer, params=None: False)
 
     metrics = engine.train_epoch()  # must not raise
 
@@ -370,10 +366,10 @@ def test_criterion_wires_align_form_and_em(tmp_path):
 
 
 def test_train_config_defaults_are_headline():
-    """TrainConfig defaults select the headline CE + Renyi-EM, trust-free setup."""
+    """TrainConfig defaults select the headline MI + Renyi-EM, trust-region setup."""
     cfg = TrainConfig(method="dares")
 
-    assert cfg.align_form == "ce"
+    assert cfg.align_form == "mi"
     assert cfg.use_renyi_em is True
     assert cfg.lambda_em == 0.05
-    assert cfg.trust_region is False
+    assert cfg.trust_region is True

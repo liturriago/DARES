@@ -137,7 +137,7 @@ def test_check_data_script(tmp_path, capsys):
     assert "forest ratio" in captured
 
 
-METHODS = ["source_only", "advent", "dacs", "fda", "dares"]
+METHODS = ["source_only", "advent", "cbst", "dacs", "fda", "dares"]
 LIME_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
 ARCH_COMBOS = [
     "resnet50_resunet",
@@ -154,14 +154,14 @@ def test_config_matrix_complete_and_valid():
 
     configs_root = ROOT / "configs"
 
-    # 1. LIME_stress: convnext_tiny_resunet x 5 methods x 3 LIME levels.
+    # 1. LIME_stress: ResNet-50 + ResUNet x 6 methods x 3 LIME levels.
     lime_dir = configs_root / "LIME_stress"
     for level, variant in LIME_LEVELS.items():
         for method in METHODS:
             path = lime_dir / level / f"{method}.yaml"
             assert path.is_file(), f"missing {path}"
             cfg = ExperimentConfig.from_yaml(path)
-            assert cfg.model.backbone == "convnext_tiny"
+            assert cfg.model.backbone == "resnet50"
             assert cfg.model.head == "resunet"
             assert cfg.data.target_variant == variant
             assert cfg.training.method == method
@@ -187,18 +187,18 @@ def test_config_matrix_complete_and_valid():
                 f"outputs/architectures/{combo}/{method}/experiment_1"
             )
 
-    # 3. ablation: convnext_tiny_resunet, medium, one DARES component off each.
+    # 3. ablation: resnet50_resunet, medium, one DARES component off each.
     ablation_dir = configs_root / "ablation"
     expected_ablations = {
         "dares_no_anti_collapse": {
             "beta": 0.0,
             "repulsion_gamma": 0.5,
-            "trust_region": False,
+            "trust_region": True,
         },
         "dares_no_repulsion": {
             "beta": 1.0,
             "repulsion_gamma": 0.0,
-            "trust_region": False,
+            "trust_region": True,
         },
         "dares_no_trust_region": {
             "beta": 1.0,
@@ -208,16 +208,16 @@ def test_config_matrix_complete_and_valid():
         "dares_align_only": {
             "align_form": "ce",
             "use_renyi_em": False,
-            "lambda_max": 1.0,
+            "lambda_max": 10.0,
         },
         "dares_em_only": {"align_form": "ce", "use_renyi_em": True, "lambda_max": 0.0},
-        "dares_align_mi": {"align_form": "mi", "use_renyi_em": True, "lambda_max": 1.0},
+        "dares_align_mi": {"align_form": "mi", "use_renyi_em": True, "lambda_max": 10.0},
     }
     for name, params in expected_ablations.items():
         path = ablation_dir / f"{name}.yaml"
         assert path.is_file(), f"missing {path}"
         cfg = ExperimentConfig.from_yaml(path)
-        assert cfg.model.backbone == "convnext_tiny"
+        assert cfg.model.backbone == "resnet50"
         assert cfg.model.head == "resunet"
         assert cfg.data.target_variant == "medium"
         assert cfg.training.method == "dares"

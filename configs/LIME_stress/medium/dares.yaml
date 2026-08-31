@@ -58,7 +58,7 @@ training:
   em_pool_kernel: 3
 
 experiment:
-  name: "convnext_resunet_medium_dares"
+  name: "resnet50_resunet_medium_dares"
   version: 1
   output_dir: "outputs/LIME_stress/medium/dares/experiment_1"
   save_results: true

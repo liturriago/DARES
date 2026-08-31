@@ -9,7 +9,7 @@ data:
   std: [1.0, 1.0, 1.0, 1.0]
   use_augmentation: true
 model:
-  backbone: "convnext_tiny"
+  backbone: "resnet50"
   head: "resunet"
   in_channels: 4
   num_classes: 2
@@ -25,7 +25,7 @@ training:
   seed: 42
   warmup_epochs: 2
 experiment:
-  name: "convnext_resunet_high_source_only"
+  name: "resnet50_resunet_high_source_only"
   version: 1
   output_dir: "outputs/LIME_stress/high/source_only/experiment_1"
   save_results: true

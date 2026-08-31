@@ -1,46 +1,62 @@
 data:
   source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
   target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Medium"
-  target_variant: medium
+  target_variant: "medium"
   batch_size: 8
   patch_size: 224
   num_workers: 4
   mean: [0.0, 0.0, 0.0, 0.0]
   std: [1.0, 1.0, 1.0, 1.0]
   use_augmentation: true
+
 model:
-  backbone: "convnext_tiny"
+  backbone: "resnet50"
   head: "resunet"
   in_channels: 4
   num_classes: 2
   pretrained: true
   dropout_rate: 0.1
+
 training:
   method: "dares"
   epochs: 25
   lr: 0.0001
   weight_decay: 0.00001
+  gamma: 0.94                 # LR Scheduler: decaimiento multiplicativo por época (BaseTrainer)
   use_amp: true
   device: "cuda"
   seed: 42
   warmup_epochs: 2
+
+  # Hiperparámetros de cuota
   quota: 256
   min_samples: 8
-  lambda_max: 1.0
-  beta: 1.0
-  repulsion_gamma: 0.5
-  eta_floor: 1.0
-  entropy_gap: 0.25
-  repulsion_margin: 0.2
+
+  # Ponderación y rampas de alineación
+  lambda_max: 10.0
   warmup_steps: 1000
   ramp_steps: 4000
   ramp_delta: 10.0
-  grad_ratio: 0.8
-  trust_region: false
-  ema_decay: 0.9
-  align_form: "ce"
-  use_renyi_em: true
-  lambda_em: 0.05
+
+  # Hiperparámetros de pérdidas DARES
+  beta: 1.0                   # Peso del piso anti-colapso (L_ac)
+  repulsion_gamma: 0.5        # Peso de repulsión inter-clase (L_rep) leído por dares.py
+  eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
+  entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
+  repulsion_margin: 0.2       # Margen hinge de separación (bits)
+
+  # Control de gradiente y forma de alineación
+  trust_region: false         # Ablación: GradNorm-lite trust region desactivado
+  grad_ratio: 0.8             # Límite rho (||g_aux|| <= 0.8 * ||g_seg||)
+  ema_decay: 0.9              # Inercia de la media móvil de gradientes
+  align_form: "mi"            # Divergencia simétrica normalizada (Delta >= 0)
+
+  # Regularización densa Rényi-EM
+  use_renyi_em: true          # Minimización densa en predicciones objetivo
+  lambda_em: 0.05             # Peso desacoplado de Rényi-EM
+  em_pool: false              # Pooling espacial del mapa de confianza
+  em_pool_kernel: 3
+
 experiment:
   name: "dares_no_trust_region"
   version: 1

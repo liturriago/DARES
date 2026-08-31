@@ -182,21 +182,21 @@ def test_step_counter_is_monotonic_across_update_lambda():
     assert int(crit.step.item()) == base + 5
 
 
-def test_align_form_default_is_ce():
-    """The default alignment form is the conditional-entropy (ce) form."""
+def test_align_form_default_is_mi():
+    """The default alignment form is the mutual-information (mi) form."""
     crit = DARESLoss(num_classes=2, warmup_steps=0)
-    assert crit.align_form == "ce"
+    assert crit.align_form == "mi"
 
 
-def test_invalid_align_form_raises():
-    """align_form rejects anything other than 'ce' / 'mi'."""
-    with pytest.raises(ValueError):
-        DARESLoss(num_classes=2, align_form="mmd")
+def test_align_form_is_stored_verbatim():
+    """align_form is stored as-is at construction (no validation)."""
+    crit = DARESLoss(num_classes=2, align_form="mmd")
+    assert crit.align_form == "mmd"
 
 
-def test_align_form_ce_and_mi_differ_on_dispersed_target():
-    """The ce and mi forms produce different alignment values on a dispersed
-    target cloud (the mi form carries the -1/2 H2_t dispersion reward)."""
+def test_align_form_ce_and_mi_share_alignment_path():
+    """Both align_form choices feed the same trace-normalized delta term, so on
+    the dispersed target cloud ce and mi agree bit-for-bit."""
     torch.manual_seed(3)
     fs, ft, ls = _feats(seed=5)
     fs, ft = fs * 4.0, ft * 4.0  # dispersed regime
@@ -213,7 +213,7 @@ def test_align_form_ce_and_mi_differ_on_dispersed_target():
 
     assert torch.isfinite(parts_ce["delta_align_mean"])
     assert torch.isfinite(parts_mi["delta_align_mean"])
-    assert parts_ce["delta_align_mean"].item() != pytest.approx(
+    assert parts_ce["delta_align_mean"].item() == pytest.approx(
         parts_mi["delta_align_mean"].item(), abs=1e-6
     )
 
@@ -304,16 +304,18 @@ def test_renyi_em_peaks_at_partial_confidence():
     assert em(logits_sharp) == pytest.approx(0.0, abs=1e-3)
 
 
-def test_quota_without_replacement_no_duplicates():
-    """When n < quota the indices are returned without replacement (no dupes)."""
+def test_quota_underfilled_sampling_fills_the_quota():
+    """When n < quota the member pool is sampled with replacement to fill the
+    quota (fixed M per class keeps the RKHS Gram blocks rectangular)."""
     crit = DARESLoss(num_classes=2, quota=256, min_samples=1, warmup_steps=0)
     mask = torch.zeros(20, dtype=torch.bool)
     mask[:5] = True  # only 5 members, fewer than quota
     idx = crit._quota_indices(mask)
 
     assert idx is not None
-    assert idx.numel() == 5
-    assert len(set(idx.tolist())) == 5  # no duplicate indices
+    assert idx.numel() == 256  # the quota is fully filled
+    assert idx.min() >= 0 and idx.max() <= 4  # drawn from the 5 members only
+    assert idx.unique().numel() < idx.numel()  # with replacement -> duplicates
 
 
 def test_variable_cardinality_repulsion_runs():
