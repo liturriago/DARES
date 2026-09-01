@@ -49,15 +49,16 @@ class DARESTrainer(BaseTrainer):
         device: torch.device,
     ) -> None:
         super().__init__(model, source_loaders, target_loaders, config, device)
-        
+
         # Compatibilidad robusta para nombres de variables entre configs
-        gamma_val = getattr(config, "gamma", getattr(config, "repulsion_gamma", 0.5))
-        
+        gamma_val = getattr(config, "repulsion_gamma", 0.5)
+
         self.criterion = DARESLoss(
             num_classes=self.num_classes,
             quota=getattr(config, "quota", 256),
             min_samples=getattr(config, "min_samples", 8),
             lambda_max=getattr(config, "lambda_max", 1.0),
+            lambda_align=getattr(config, "lambda_align", 1.0),
             beta=getattr(config, "beta", 1.0),
             gamma=gamma_val,
             eta_floor=getattr(config, "eta_floor", 1.0),
@@ -69,13 +70,12 @@ class DARESTrainer(BaseTrainer):
             grad_ratio=getattr(config, "grad_ratio", 0.8),
             trust_region=getattr(config, "trust_region", True),
             ema_decay=getattr(config, "ema_decay", 0.9),
-            align_form=getattr(config, "align_form", "mi"),
             use_renyi_em=getattr(config, "use_renyi_em", True),
             lambda_em=getattr(config, "lambda_em", 0.05),
             em_pool=getattr(config, "em_pool", False),
             em_pool_kernel=getattr(config, "em_pool_kernel", 3),
         ).to(device)
-        
+
         self.ref_params = list(self.model.backbone.reference_params)
         self.optimizer = self._make_optimizer(self.model.parameters())
 
@@ -146,9 +146,7 @@ class DARESTrainer(BaseTrainer):
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 feats_s, logits_s = self.model(imgs_s, mode="deep")
                 feats_t, logits_t = self.model(imgs_t, mode="deep")
-                _, parts = self.criterion(
-                    feats_s, logits_s, masks_s, feats_t, logits_t
-                )
+                _, parts = self.criterion(feats_s, logits_s, masks_s, feats_t, logits_t)
 
             # 1. Actualiza lambda_eff con base en los gradientes del lote actual
             lam_eff = self.criterion.update_lambda(

@@ -182,45 +182,47 @@ def test_step_counter_is_monotonic_across_update_lambda():
     assert int(crit.step.item()) == base + 5
 
 
-def test_align_form_default_is_mi():
-    """The default alignment form is the mutual-information (mi) form."""
+def test_lambda_align_default_is_one():
+    """The alignment weight defaults to 1.0 (alignment active)."""
     crit = DARESLoss(num_classes=2, warmup_steps=0)
-    assert crit.align_form == "mi"
+    assert crit.lambda_align == 1.0
 
 
-def test_align_form_is_stored_verbatim():
-    """align_form is stored as-is at construction (no validation)."""
-    crit = DARESLoss(num_classes=2, align_form="mmd")
-    assert crit.align_form == "mmd"
-
-
-def test_align_form_ce_and_mi_share_alignment_path():
-    """Both align_form choices feed the same trace-normalized delta term, so on
-    the dispersed target cloud ce and mi agree bit-for-bit."""
+def test_lambda_align_zero_removes_alignment_contribution():
+    """lambda_align=0 drops only the alignment term from loss_aux, leaving the
+    anti-collapse and repulsion terms intact."""
     torch.manual_seed(3)
     fs, ft, ls = _feats(seed=5)
-    fs, ft = fs * 4.0, ft * 4.0  # dispersed regime
+    fs, ft = fs * 4.0, ft * 4.0
     logits_s = torch.randn(2, 2, 16, 16)
-    logits_t = torch.randn(2, 2, 16, 16)
-    logits_t[:, 0] += 3.0
+    logits_t = torch.zeros(2, 2, 16, 16)
+    logits_t[:, 0, :, :8] = 5.0  # left half -> class 0
+    logits_t[:, 1, :, 8:] = 5.0  # right half -> class 1
 
-    _, parts_ce = DARESLoss(num_classes=2, warmup_steps=0, align_form="ce")(
+    _, parts_on = DARESLoss(num_classes=2, warmup_steps=0, lambda_align=1.0)(
         fs, logits_s, ls, ft, logits_t
     )
-    _, parts_mi = DARESLoss(num_classes=2, warmup_steps=0, align_form="mi")(
+    _, parts_off = DARESLoss(num_classes=2, warmup_steps=0, lambda_align=0.0)(
         fs, logits_s, ls, ft, logits_t
     )
 
-    assert torch.isfinite(parts_ce["delta_align_mean"])
-    assert torch.isfinite(parts_mi["delta_align_mean"])
-    assert parts_ce["delta_align_mean"].item() == pytest.approx(
-        parts_mi["delta_align_mean"].item(), abs=1e-6
+    # The raw alignment diagnostic is still reported, unchanged.
+    assert parts_off["loss_align"].item() == pytest.approx(
+        parts_on["loss_align"].item(), abs=1e-6
     )
+    # With alignment off, loss_aux = beta * ac + gamma * rep only.
+    expected = (
+        parts_off["loss_anti_collapse"].item()
+        + 0.5 * parts_off["loss_repulsion"].item()
+    )
+    assert parts_off["loss_aux"].item() == pytest.approx(expected, abs=1e-5)
+    # The on-auxiliary includes the alignment term, so it is larger.
+    assert parts_on["loss_aux"].item() > parts_off["loss_aux"].item() + 1e-6
 
 
-def test_align_form_ce_still_stop_grads_source():
-    """The ce form keeps the asymmetric source anchoring (no grad -> fs)."""
-    crit = DARESLoss(num_classes=2, warmup_steps=0, align_form="ce")
+def test_source_stop_grads():
+    """The alignment keeps asymmetric source anchoring (no grad -> fs)."""
+    crit = DARESLoss(num_classes=2, warmup_steps=0)
     fs, ft, ls = _feats(seed=1)
     fs.requires_grad_(True)
     ft.requires_grad_(True)

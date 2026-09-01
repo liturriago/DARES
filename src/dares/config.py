@@ -83,17 +83,17 @@ class TrainConfig(BaseModel):
 
     # DARES Loss Safeguards
     lambda_max: float = Field(default=1.0, ge=0.0)
+    lambda_align: float = Field(default=1.0, ge=0.0)
     beta: float = Field(default=1.0, ge=0.0)
     repulsion_gamma: float = Field(default=0.5, ge=0.0)
     eta_floor: float = Field(default=1.0, ge=0.0)
     entropy_gap: float = Field(default=0.25, ge=0.0)
     repulsion_margin: float = Field(default=0.2, ge=0.0)
 
-    # Gradient Control & Alignment Form (CORREGIDOS A VALORES ESTABLES)
+    # Gradient Control
     trust_region: bool = True
     grad_ratio: float = Field(default=0.8, gt=0.0)
     ema_decay: float = Field(default=0.9, gt=0.0, le=1.0)
-    align_form: Literal["ce", "mi"] = "mi"
 
     # Rényi-EM dense regularization
     use_renyi_em: bool = True

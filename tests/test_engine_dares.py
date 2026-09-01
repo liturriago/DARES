@@ -353,23 +353,23 @@ def test_skipped_step_does_not_break_scaler_update(tmp_path, monkeypatch):
     assert len(update_calls) == 0  # update() skipped alongside the skipped step
 
 
-def test_criterion_wires_align_form_and_em(tmp_path):
-    """The engine forwards align_form / EM settings into the DARESLoss."""
+def test_criterion_wires_align_and_em(tmp_path):
+    """The engine forwards lambda_align / EM settings into the DARESLoss."""
     model, source_loaders, target_loaders, config, device = _build_fixtures(
-        tmp_path, align_form="mi", use_renyi_em=False, lambda_em=0.2
+        tmp_path, lambda_align=0.0, use_renyi_em=False, lambda_em=0.2
     )
     engine = DARESTrainer(model, source_loaders, target_loaders, config, device)
 
-    assert engine.criterion.align_form == "mi"
+    assert engine.criterion.lambda_align == 0.0
     assert engine.criterion.use_renyi_em is False
     assert engine.criterion.lambda_em == 0.2
 
 
 def test_train_config_defaults_are_headline():
-    """TrainConfig defaults select the headline MI + Renyi-EM, trust-region setup."""
+    """TrainConfig defaults select the alignment + Renyi-EM, trust-region setup."""
     cfg = TrainConfig(method="dares")
 
-    assert cfg.align_form == "mi"
+    assert cfg.lambda_align == 1.0
     assert cfg.use_renyi_em is True
     assert cfg.lambda_em == 0.05
     assert cfg.trust_region is True

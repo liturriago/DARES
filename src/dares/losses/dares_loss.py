@@ -27,6 +27,7 @@ class DARESLoss(nn.Module):
         quota: int = 256,
         min_samples: int = 8,
         lambda_max: float = 1.0,
+        lambda_align: float = 1.0,
         beta: float = 1.0,
         gamma: float = 0.5,
         eta_floor: float = 1.0,
@@ -38,7 +39,6 @@ class DARESLoss(nn.Module):
         grad_ratio: float = 0.8,
         trust_region: bool = True,
         ema_decay: float = 0.9,
-        align_form: str = "mi",
         use_renyi_em: bool = True,
         lambda_em: float = 0.05,
         em_pool: bool = False,
@@ -54,6 +54,7 @@ class DARESLoss(nn.Module):
         self.quota = int(quota)
         self.min_samples = int(min_samples)
         self.lambda_max = float(lambda_max)
+        self.lambda_align = float(lambda_align)
         self.beta = float(beta)
         self.gamma = float(gamma)
         self.eta_floor = float(eta_floor)
@@ -65,7 +66,6 @@ class DARESLoss(nn.Module):
         self.grad_ratio = float(grad_ratio)
         self.trust_region = bool(trust_region)
         self.ema_decay = float(ema_decay)
-        self.align_form = align_form
         self.use_renyi_em = bool(use_renyi_em)
         self.lambda_em = float(lambda_em)
         self.em_pool = bool(em_pool)
@@ -112,7 +112,9 @@ class DARESLoss(nn.Module):
             return idx[torch.randperm(n, device=idx.device)[: self.quota]]
         return idx[torch.randint(0, n, (self.quota,), device=idx.device)]
 
-    def _spatial_pool(self, w: torch.Tensor, batch: int, size: tuple[int, int]) -> torch.Tensor:
+    def _spatial_pool(
+        self, w: torch.Tensor, batch: int, size: tuple[int, int]
+    ) -> torch.Tensor:
         """Average-pools confidence weight over a spatial window."""
         wmap = w.view(batch, 1, size[0], size[1])
         pad = self.em_pool_kernel // 2
@@ -129,7 +131,9 @@ class DARESLoss(nn.Module):
         med = d2[iu[0], iu[1]].median()
         return (med + 1e-12).sqrt().clamp(self.sigma_min, self.sigma_max).detach()
 
-    def _rbf(self, x: torch.Tensor, y: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+    def _rbf(
+        self, x: torch.Tensor, y: torch.Tensor, sigma: torch.Tensor
+    ) -> torch.Tensor:
         d2 = torch.cdist(x, y, p=2.0) ** 2
         return torch.exp(-d2 / (2.0 * sigma * sigma + self.eps))
 
@@ -270,7 +274,9 @@ class DARESLoss(nn.Module):
 
                 ptr_diag = s2d / (trv * trv).clamp_min(self.eps)
                 ptr_cross = s2 / (trv[:, None] * trv[None, :]).clamp_min(self.eps)
-                ptr_joint = 0.25 * (ptr_diag[:, None] + ptr_diag[None, :] + 2.0 * ptr_cross)
+                ptr_joint = 0.25 * (
+                    ptr_diag[:, None] + ptr_diag[None, :] + 2.0 * ptr_cross
+                )
 
                 Dmat = F.relu(
                     -torch.log2(ptr_joint.clamp_min(self.eps))
@@ -289,7 +295,11 @@ class DARESLoss(nn.Module):
                 rep_mean = fs.new_tensor(float("nan"))
                 n_pairs = 0
 
-            loss_aux = loss_align + self.beta * loss_ac + self.gamma * loss_rep
+            loss_aux = (
+                self.lambda_align * loss_align
+                + self.beta * loss_ac
+                + self.gamma * loss_rep
+            )
 
         total = loss_seg + float(self.lambda_eff) * loss_aux + self.lambda_em * loss_em
 

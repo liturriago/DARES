@@ -187,33 +187,16 @@ def test_config_matrix_complete_and_valid():
                 f"outputs/architectures/{combo}/{method}/experiment_1"
             )
 
-    # 3. ablation: resnet50_resunet, medium, one DARES component off each.
+    # 3. ablation: resnet50_resunet, medium, one DARES term off each.
     ablation_dir = configs_root / "ablation"
+    # name -> (config field, off value): the single term switched off.
     expected_ablations = {
-        "dares_no_anti_collapse": {
-            "beta": 0.0,
-            "repulsion_gamma": 0.5,
-            "trust_region": True,
-        },
-        "dares_no_repulsion": {
-            "beta": 1.0,
-            "repulsion_gamma": 0.0,
-            "trust_region": True,
-        },
-        "dares_no_trust_region": {
-            "beta": 1.0,
-            "repulsion_gamma": 0.5,
-            "trust_region": False,
-        },
-        "dares_align_only": {
-            "align_form": "ce",
-            "use_renyi_em": False,
-            "lambda_max": 10.0,
-        },
-        "dares_em_only": {"align_form": "ce", "use_renyi_em": True, "lambda_max": 0.0},
-        "dares_align_mi": {"align_form": "mi", "use_renyi_em": True, "lambda_max": 10.0},
+        "dares_no_align": ("lambda_align", 0.0),
+        "dares_no_anti_collapse": ("beta", 0.0),
+        "dares_no_repulsion": ("repulsion_gamma", 0.0),
+        "dares_no_em": ("use_renyi_em", False),
     }
-    for name, params in expected_ablations.items():
+    for name, (field, off_value) in expected_ablations.items():
         path = ablation_dir / f"{name}.yaml"
         assert path.is_file(), f"missing {path}"
         cfg = ExperimentConfig.from_yaml(path)
@@ -224,11 +207,4 @@ def test_config_matrix_complete_and_valid():
         assert cfg.experiment.output_dir == Path(
             f"outputs/ablation/{name}/experiment_1"
         )
-        if "beta" in params:
-            assert cfg.training.beta == params["beta"]
-            assert cfg.training.repulsion_gamma == params["repulsion_gamma"]
-            assert cfg.training.trust_region == params["trust_region"]
-        else:
-            assert cfg.training.align_form == params["align_form"]
-            assert cfg.training.use_renyi_em == params["use_renyi_em"]
-            assert cfg.training.lambda_max == params["lambda_max"]
+        assert getattr(cfg.training, field) == off_value

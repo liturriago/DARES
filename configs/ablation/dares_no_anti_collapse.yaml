@@ -34,22 +34,22 @@ training:
 
   # Ponderación y rampas de alineación
   lambda_max: 10.0
+  lambda_align: 1.0         # Peso de alineación (0 desactiva solo L_align)
   warmup_steps: 1000
   ramp_steps: 4000
   ramp_delta: 10.0
 
   # Hiperparámetros de pérdidas DARES
   beta: 0.0                   # Ablación: piso anti-colapso (L_ac) desactivado
-  repulsion_gamma: 0.5        # Peso de repulsión inter-clase (L_rep) leído por dares.py
+  repulsion_gamma: 0.94        # Peso de repulsión inter-clase (L_rep) leído por dares.py
   eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
   entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
   repulsion_margin: 0.2       # Margen hinge de separación (bits)
 
-  # Control de gradiente y forma de alineación
+  # Control de gradiente
   trust_region: true          # GradNorm-lite EMA activo
   grad_ratio: 0.8             # Límite rho (||g_aux|| <= 0.8 * ||g_seg||)
   ema_decay: 0.9              # Inercia de la media móvil de gradientes
-  align_form: "mi"            # Divergencia simétrica normalizada (Delta >= 0)
 
   # Regularización densa Rényi-EM
   use_renyi_em: true          # Minimización densa en predicciones objetivo

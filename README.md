@@ -79,12 +79,10 @@ configs/
 │   ├── swin_t_resunet/
 │   └── swin_t_deeplabv3p/
 └── ablation/               # DARES with one component disabled (medium, ResNet-50 + ResUNet)
+    ├── dares_no_align.yaml
     ├── dares_no_anti_collapse.yaml
     ├── dares_no_repulsion.yaml
-    ├── dares_no_trust_region.yaml
-    ├── dares_align_only.yaml
-    ├── dares_em_only.yaml
-    └── dares_align_mi.yaml
+    └── dares_no_em.yaml
 ```
 
 `configs/LIME_stress/medium/dares.yaml` is the **DARES reference (headline) setup**. All other DARES configs (LIME tiers and architectures) share its exact training block and change only their target tier or model architecture; the ablation configs reuse it with exactly one safeguard switched off (see the comments in each file).
@@ -125,6 +123,7 @@ training:
   quota: 256              # M — pixels sampled per class per batch
   min_samples: 8          # tau — class must have >= this many pixels
   lambda_max: 10.0        # peak alignment weight (DARES reference value)
+  lambda_align: 1.0       # alignment term weight (L_align); 0 disables alignment only
   warmup_steps: 1000      # steps with lambda_eff = 0 (source-only warm-up)
   ramp_steps: 4000        # sigmoid ramp length (steps)
   ramp_delta: 10.0        # sigmoid steepness
@@ -138,7 +137,6 @@ training:
   trust_region: true      # GradNorm-lite trust region (set false to ablate)
   grad_ratio: 0.8         # rho — max ||g_aux||/||g_seg|| trust-region cap
   ema_decay: 0.9          # EMA decay for gradient norms
-  align_form: "mi"        # mi | ce — symmetric normalized divergence
 
   use_renyi_em: true      # dense Rényi-EM regularization on target predictions
   lambda_em: 0.05         # EM weight (decoupled from the alignment weight)
