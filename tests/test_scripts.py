@@ -137,7 +137,7 @@ def test_check_data_script(tmp_path, capsys):
     assert "forest ratio" in captured
 
 
-METHODS = ["source_only", "advent", "cbst", "dacs", "fda", "dares"]
+METHODS = ["source_only", "advent", "cbst", "clan", "dacs", "fda", "dares"]
 LIME_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
 ARCH_COMBOS = [
     "resnet50_resunet",

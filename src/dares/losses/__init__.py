@@ -12,6 +12,8 @@ Method-specific losses live in sibling modules:
 * ``advent``  ->  entropy minimization loss (ADVENT engine).
 * ``cbst``  ->  class-balanced pseudo-labeling and masked self-training loss
   (CBST engine).
+* ``clan``  ->  category-level multi-class discriminator and masked class-slice
+  alignment losses (CLAN engine).
 * ``dacs``  ->  color jitter, Gaussian blur, ClassMix and pseudo-labeling
   helpers (DACS engine).
 * ``fda``  ->  Fourier-domain amplitude swap and Charbonnier entropy loss (FDA

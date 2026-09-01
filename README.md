@@ -9,7 +9,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 
 ## Features
 
-- **Six UDA methods** under one shared training interface: Source-Only baseline, ADVENT, CBST, DACS, FDA and **DARES** (the proposed α-Rényi alignment).
+- **Seven UDA methods** under one shared training interface: Source-Only baseline, ADVENT, CBST, CLAN, DACS, FDA and **DARES** (the proposed α-Rényi alignment).
 - **Pluggable architecture matrix:** backbones (ResNet50, ConvNeXt-Tiny, Swin-T) × segmentation heads (ResUNet decoder, DeepLabV3+ ASPP).
 - **DARES core loss (DARESLoss):** hardened class-conditional order-2 Rényi alignment over Gaussian Gram matrices with median-heuristic kernel bandwidth, per-pixel Rényi-2 confidence weighting, anti-collapse spectral entropy floors (`H2 ≥ η`), margin-hinged inter-class target repulsion, a per-step GradNorm-lite trust region on the deepest encoder block, and a dense Rényi-EM regularization term (`L_em`) on confident target predictions.
 - **CREDA dynamic alignment schedule:** the Rényi weight follows the per-step sigmoid ramp `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` (CREDA + GradNorm-lite EMA), so the alignment ramps in smoothly and can never dominate the supervised gradient.
@@ -25,6 +25,7 @@ DARES adapts a segmentation model trained on **Sentinel-2** imagery over the Bra
 | `source_only` | Baseline | Supervised CE on source only (adaptation gap reference). |
 | `advent` | Adversarial | Entropy-map domain discriminator + target entropy minimization. |
 | `cbst` | Self-training | Class-balanced self-training: per-class top-ratio pseudo-label selection + masked CE on target. |
+| `clan` | Adversarial (output space) | Category-level adversarial output-space adaptation: a multi-class discriminator takes a single masked class channel (a "slice") of the prediction and classifies source vs target; target slices are pushed back towards their pseudo-label categories (CAA-Net / CLAN). |
 | `fda` | Spectral alignment | Fourier low-frequency amplitude swap + Charbonnier entropy minimization. |
 | `dares` | Info-theoretic | `L = L_seg + λ_eff·(L_align + β·L_ac + γ·L_rep) + λ_em·L_em` — hardened DARES class-conditional Rényi alignment with anti-collapse entropy floors, margin-hinged target repulsion, a per-step gradient trust region `λ_eff = λ_max·s(t)·min(1, ρ·ĝ_seg/ĝ_aux)` and dense Rényi-EM regularization. |
 
@@ -68,7 +69,7 @@ Experiments are fully described by a YAML file, organized in three folders:
 
 ```
 configs/
-├── LIME_stress/            # ResNet-50 + ResUNet × 6 methods × {low, medium, high} LIME tiers
+├── LIME_stress/            # ResNet-50 + ResUNet × 7 methods × {low, medium, high} LIME tiers
 │   ├── low/
 │   ├── medium/
 │   └── high/
@@ -219,8 +220,8 @@ src/dares/
 ├── config.py            # Pydantic configs (data / model / training / experiment)
 ├── data/                # HDF5Dataset, pair transforms, collate, DARESDataLoader
 ├── models/              # backbones (resnet50, convnext, swin) + heads (resunet, deeplabv3p) + SegmentationModel
-├── losses/              # CE, domain (discriminator), advent, cbst, fda, dares_loss (DARES)
-├── engines/             # source_only, advent, cbst, fda, dares trainers + registry
+├── losses/              # CE, domain (discriminator), advent, cbst, clan, fda, dares_loss (DARES)
+├── engines/             # source_only, advent, cbst, clan, dacs, fda, dares trainers + registry
 ├── training/            # BaseTrainer (AMP, evaluation, checkpointing, fit loop)
 └── utils/               # metrics (mIoU/DICE/OA/MCC), evaluation, visualizer, reproducibility
 scripts/                 # train.py, evaluate.py, check_data.py
@@ -261,6 +262,20 @@ The CREDA foundation is described in:
   pages   = {2602},
   year    = {2025},
   doi     = {10.3390/math13162602}
+}
+```
+
+The category-level output-space adversarial baseline (CLAN / CAA-Net) is described in:
+
+```bibtex
+@article{ruan2019clan,
+  title   = {Category-Level Adversaries for Semantic Domain Adaptation},
+  author  = {Ruan, Congcong and Wang, Wei and Hu, Haifeng and Chen, Dihu},
+  journal = {IEEE Access},
+  volume  = {7},
+  pages   = {83198--83208},
+  year    = {2019},
+  doi     = {10.1109/ACCESS.2019.2921030}
 }
 ```
 

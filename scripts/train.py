@@ -2,8 +2,8 @@
 Command-line script to train any DARES unsupervised domain adaptation method.
 
 The training method is selected by ``training.method`` in the YAML config
-(``source_only``, ``advent``, ``cbst``, ``dacs``, ``fda`` or ``dares``) and can be
-overridden with ``--method``.
+(``source_only``, ``advent``, ``cbst``, ``clan``, ``dacs``, ``fda`` or
+``dares``) and can be overridden with ``--method``.
 
 Examples:
     python scripts/train.py --config configs/LIME_stress/medium/dares.yaml
@@ -117,7 +117,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="DARES training script (source_only / advent / cbst / dacs / fda / dares)"
+        description="DARES training script (source_only / advent / cbst / clan / dacs / fda / dares)"
     )
     parser.add_argument(
         "--config",
@@ -129,7 +129,7 @@ if __name__ == "__main__":
         "--method",
         type=str,
         default=None,
-        help="Override the training method (source_only, advent, cbst, dacs, fda, dares)",
+        help="Override the training method (source_only, advent, cbst, clan, dacs, fda, dares)",
     )
     parser.add_argument(
         "--device",

@@ -102,11 +102,17 @@ class TrainConfig(BaseModel):
     em_pool_kernel: int = Field(default=3, gt=0)
 
     # Method selection
-    method: Literal["source_only", "advent", "cbst", "dacs", "fda", "dares"] = "dares"
+    method: Literal[
+        "source_only", "advent", "cbst", "dacs", "fda", "dares", "clan"
+    ] = "dares"
 
     # ADVENT
     lambda_adv: float = Field(default=0.1, ge=0.0)
     lambda_entropy: float = Field(default=0.1, ge=0.0)
+
+    # CLAN (category-level adversarial adaptation networks)
+    lambda_clan: float = Field(default=1.0, ge=0.0)
+    clan_threshold: float = Field(default=0.5, gt=0.0, le=1.0)
 
     # CBST
     lambda_self: float = Field(default=1.0, ge=0.0)
