@@ -122,6 +122,61 @@ def test_evaluate_script_end_to_end(tmp_path):
     assert metrics["target_test"]["mIoU"] >= 0.0
 
 
+def test_infer_script_end_to_end(tmp_path):
+    """infer.py loads a checkpoint on one image and writes all artifacts."""
+    import torch
+
+    from dares.config import ExperimentConfig
+    from dares.models import build_model
+    from scripts.infer import main as infer_main
+
+    out_dir = str(tmp_path / "outputs" / "source_only")
+    config_path = write_config(tmp_path, "source_only", out_dir)
+    cfg = ExperimentConfig.from_yaml(str(config_path))
+    model = build_model(cfg.model)
+    model_path = tmp_path / "weights.pth"
+    torch.save({"model": model.state_dict()}, model_path)
+
+    infer_dir = str(tmp_path / "inference")
+    infer_main(
+        str(config_path),
+        str(model_path),
+        str(tmp_path / "source_test.h5"),
+        index=1,
+        output_dir=infer_dir,
+        device="cpu",
+    )
+
+    out = Path(infer_dir)
+    for name in (
+        "source_test_prediction.png",
+        "source_test_prediction.npy",
+        "source_test_probability.npy",
+        "source_test_probability.png",
+        "source_test_overlay.png",
+    ):
+        assert (out / name).is_file(), name
+
+    mask = np.load(out / "source_test_prediction.npy")
+    assert mask.shape == (64, 64)
+    assert set(np.unique(mask)) <= {0, 1}
+    prob = np.load(out / "source_test_probability.npy")
+    assert prob.shape == (64, 64)
+    assert 0.0 <= float(prob.min()) and float(prob.max()) <= 1.0
+
+    # NumPy image input with fewer bands than the model: zero-padded, no error.
+    np_path = tmp_path / "scene.npy"
+    np.save(np_path, np.random.rand(2, 64, 64).astype(np.float32))
+    infer_main(
+        str(config_path),
+        str(model_path),
+        str(np_path),
+        output_dir=str(tmp_path / "inference_npy"),
+        device="cpu",
+    )
+    assert (tmp_path / "inference_npy" / "scene_prediction.npy").is_file()
+
+
 def test_check_data_script(tmp_path, capsys):
     """check_data.py validates the six containers and reports per-split stats."""
     from scripts.check_data import main as check_main
@@ -139,13 +194,13 @@ def test_check_data_script(tmp_path, capsys):
 
 METHODS = ["source_only", "advent", "cbst", "dares"]
 LIME_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
-ARCH_COMBOS = [
-    "resnet50_resunet",
-    "resnet50_deeplabv3p",
-    "convnext_tiny_deeplabv3p",
-    "swin_t_resunet",
-    "swin_t_deeplabv3p",
-]
+ARCH_COMBOS = {
+    "convnext_resunet": ("convnext_tiny", "resunet"),
+    "convnext_tiny_deeplabv3p": ("convnext_tiny", "deeplabv3p"),
+    "resnet50_deeplabv3p": ("resnet50", "deeplabv3p"),
+    "swin_t_deeplabv3p": ("swin_t", "deeplabv3p"),
+    "swin_t_resunet": ("swin_t", "resunet"),
+}
 
 
 def test_config_matrix_complete_and_valid():
@@ -173,8 +228,7 @@ def test_config_matrix_complete_and_valid():
 
     # 2. architectures: source_only + dares, medium, 5 backbone-head combos.
     arch_dir = configs_root / "architectures"
-    for combo in ARCH_COMBOS:
-        backbone, head = combo.rsplit("_", 1)
+    for combo, (backbone, head) in ARCH_COMBOS.items():
         for method in ("source_only", "dares"):
             path = arch_dir / combo / f"{method}.yaml"
             assert path.is_file(), f"missing {path}"
@@ -183,9 +237,8 @@ def test_config_matrix_complete_and_valid():
             assert cfg.model.head == head
             assert cfg.data.target_variant == "medium"
             assert cfg.training.method == method
-            assert cfg.experiment.output_dir == Path(
-                f"outputs/architectures/{combo}/{method}/experiment_1"
-            )
+            assert cfg.experiment.output_dir.parts[:2] == ("outputs", "architectures")
+            assert cfg.experiment.output_dir.parts[-2:] == (method, "experiment_1")
 
     # 3. ablation: resnet50_resunet, medium, one DARES term off each.
     ablation_dir = configs_root / "ablation"

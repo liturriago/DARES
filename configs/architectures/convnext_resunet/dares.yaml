@@ -10,7 +10,7 @@ data:
   use_augmentation: true
 
 model:
-  backbone: "swin_t"
+  backbone: "convnext_tiny"
   head: "resunet"
   in_channels: 4
   num_classes: 2
@@ -18,7 +18,7 @@ model:
   dropout_rate: 0.1
 
 training:
-  method: "dares_v2"
+  method: "dares"
   epochs: 25
   lr: 0.0001
   weight_decay: 0.00001
@@ -40,8 +40,8 @@ training:
   ramp_delta: 10.0
 
   # Hiperparámetros de pérdidas DARES
-  beta: 0.0                   # v2 LEAN: el global acotado subsume el piso (seguro: >0)
-  repulsion_gamma: 0.0        # v2 LEAN: la correspondencia local subsume la repulsión (seguro: >0)
+  beta: 1.0                   # Peso del piso anti-colapso (L_ac)
+  repulsion_gamma: 0.94        # Peso de repulsión inter-clase (L_rep) leído por dares.py
   eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
   entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
   repulsion_margin: 0.2       # Margen hinge de separación (bits)
@@ -57,15 +57,8 @@ training:
   em_pool: false              # Pooling espacial del mapa de confianza
   em_pool_kernel: 3
 
-  # DARES v2 (mejoras MIL-CREDA)
-  lambda_local: 0.5           # Peso del término de correspondencia local (Ec. 38)
-  tau_local: 1.0              # Temperatura del softmax de correspondencia (Ec. 28)
-  soft_class_weights: true    # Peso target = confianza x masa suave de clase (Ec. 29)
-  bounded_align: true         # Global acotado [0,1] por cotas conservativas (Ecs. 34-36)
-  normalize_seg: false        # Dividir L_seg por su supremo ln(1+1/eps) (Ec. 18)
-
 experiment:
-  name: "swin_t_resunet_dares_v2"
+  name: "convnext_tiny_resunet_dares"
   version: 1
-  output_dir: "outputs/architectures/swin_t_resunet/dares_v2/experiment_1"
+  output_dir: "outputs/architectures/convnext_tiny_resunet/dares/experiment_1"
   save_results: true

@@ -9,7 +9,7 @@ data:
   std: [1.0, 1.0, 1.0, 1.0]
   use_augmentation: true
 model:
-  backbone: "resnet50"
+  backbone: "convnext_tiny"
   head: "resunet"
   in_channels: 4
   num_classes: 2
@@ -25,7 +25,7 @@ training:
   seed: 42
   warmup_epochs: 2
 experiment:
-  name: "resnet50_resunet_source_only"
+  name: "convnext_tiny_resunet_source_only"
   version: 1
-  output_dir: "outputs/architectures/resnet50_resunet/source_only/experiment_1"
+  output_dir: "outputs/architectures/convnext_tiny_resunet/source_only/experiment_1"
   save_results: true
