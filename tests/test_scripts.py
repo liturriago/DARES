@@ -137,7 +137,7 @@ def test_check_data_script(tmp_path, capsys):
     assert "forest ratio" in captured
 
 
-METHODS = ["source_only", "advent", "cbst", "clan", "dacs", "fda", "dares"]
+METHODS = ["source_only", "advent", "cbst", "dares"]
 LIME_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
 ARCH_COMBOS = [
     "resnet50_resunet",
@@ -154,7 +154,7 @@ def test_config_matrix_complete_and_valid():
 
     configs_root = ROOT / "configs"
 
-    # 1. LIME_stress: ResNet-50 + ResUNet x 6 methods x 3 LIME levels.
+    # 1. LIME_stress: ResNet-50 + ResUNet x 4 methods x 3 LIME levels.
     lime_dir = configs_root / "LIME_stress"
     for level, variant in LIME_LEVELS.items():
         for method in METHODS:

@@ -241,9 +241,7 @@ If you use this framework, please cite the DARES paper:
 @article{iturriago2026dares,
   title   = {DARES: Domain Adaptation via $\alpha$-R\'enyi Entropy for Semantic Segmentation},
   author  = {Iturriago Salas, Lucas Miguel and Collazos Huertas, Diego Fabi\'an and
-             Alvarez Meza, Andres Marino and Lozada Das Dores, Angel Jose and
-             Romero S\'anchez, Alexander and L\'opez, Juan Diego and
-             Bustamente Herrera, David Guillermo},
+             Alvarez Meza, Andres Marino and Lozada Das Dores, Angel Jose},
   year    = {2026}
 }
 ```

@@ -20,6 +20,9 @@ venv/
 # Domain AdaptationS
 /Domain_Adaptation
 
+# Documentación local (no versionar)
+Docs/
+
 # Notebooks
 .ipynb_checkpoints
 
