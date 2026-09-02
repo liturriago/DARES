@@ -124,7 +124,7 @@ def test_dares_v2_yaml_configs_parse():
     """All shipped v2 configs validate, carry the new hyperparameters and
     keep their UTF-8 comments intact."""
     files = _v2_yaml_files()
-    assert len(files) >= 15
+    assert len(files) >= 17
     for path in files:
         cfg = ExperimentConfig.from_yaml(path)
         assert cfg.training.method == "dares_v2", path
@@ -134,3 +134,19 @@ def test_dares_v2_yaml_configs_parse():
         assert isinstance(cfg.training.soft_class_weights, bool), path
         raw = path.read_text(encoding="utf-8")
         assert "é" in raw and "ó" in raw, path
+
+
+def test_dares_v2_headline_configs_are_lean():
+    """LIME_stress and architectures configs run the lean composition:
+    no anti-collapse floor and no repulsion (the ablations re-add them)."""
+    headline = [
+        p
+        for p in _v2_yaml_files()
+        if "ablation" not in p.parts
+    ]
+    assert len(headline) >= 8
+    for path in headline:
+        cfg = ExperimentConfig.from_yaml(path)
+        assert cfg.training.beta == 0.0, path
+        assert cfg.training.repulsion_gamma == 0.0, path
+        assert cfg.training.use_renyi_em is True, path

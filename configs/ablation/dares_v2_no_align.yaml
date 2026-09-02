@@ -34,14 +34,14 @@ training:
 
   # Ponderación y rampas de alineación
   lambda_max: 10.0
-  lambda_align: 0.0         # Ablación: global desactivado, local + ac + rep + EM activos
+  lambda_align: 0.0         # Ablación: sin global -> mide solo local + soft + EM
   warmup_steps: 1000
   ramp_steps: 4000
   ramp_delta: 10.0
 
   # Hiperparámetros de pérdidas DARES
-  beta: 1.0                   # Peso del piso anti-colapso (L_ac)
-  repulsion_gamma: 0.94        # Peso de repulsión inter-clase (L_rep) leído por dares.py
+  beta: 0.0                   # v2 LEAN: el global acotado subsume el piso (seguro: >0)
+  repulsion_gamma: 0.0        # v2 LEAN: la correspondencia local subsume la repulsión (seguro: >0)
   eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
   entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
   repulsion_margin: 0.2       # Margen hinge de separación (bits)

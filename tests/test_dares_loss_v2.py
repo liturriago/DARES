@@ -128,7 +128,7 @@ def test_soft_class_weights_multiply_confidence():
 
 
 def test_v2_reduces_to_v1_when_all_upgrades_disabled():
-    """local=0, bounded=False, soft=False reproduces the V1 numbers exactly."""
+    """local=0, bounded=False, soft=False (with v1's ac/rep weights) == V1."""
     fs, ft, ls = _feats(seed=5)
     logits_s = torch.randn(2, 2, 16, 16)
     lt = _logits_t(seed=6)
@@ -139,6 +139,8 @@ def test_v2_reduces_to_v1_when_all_upgrades_disabled():
     _, p2 = DARESLossV2(
         num_classes=2,
         warmup_steps=0,
+        beta=1.0,
+        gamma=0.5,
         lambda_local=0.0,
         bounded_align=False,
         soft_class_weights=False,
@@ -148,6 +150,35 @@ def test_v2_reduces_to_v1_when_all_upgrades_disabled():
         assert p2[key].item() == pytest.approx(p1[key].item(), rel=1e-5), key
     assert p2["loss_aux"].item() == pytest.approx(p1["loss_aux"].item(), rel=1e-5)
     assert p2["loss_local"].item() == 0.0
+
+
+def test_v2_defaults_are_lean():
+    """The MIL-CREDA essence: ac floor and repulsion are opt-in in v2."""
+    crit = DARESLossV2(num_classes=2)
+    assert crit.beta == 0.0
+    assert crit.gamma == 0.0
+    assert crit.lambda_local == 0.5
+    assert crit.bounded_align is True
+    assert crit.soft_class_weights is True
+
+
+def test_gated_terms_report_zero_and_are_not_computed():
+    """beta=gamma=lambda_local=0 -> exact-zero diagnostics, aux == align only."""
+    crit = DARESLossV2(
+        num_classes=2, warmup_steps=0, beta=0.0, gamma=0.0, lambda_local=0.0
+    )
+    fs, ft, ls = _feats(seed=4)
+    _, parts = crit(fs, torch.randn(2, 2, 16, 16), ls, ft, _logits_t(seed=5))
+
+    assert parts["n_valid_classes"].item() >= 1
+    assert parts["loss_anti_collapse"].item() == 0.0
+    assert parts["loss_repulsion"].item() == 0.0
+    assert parts["loss_local"].item() == 0.0
+    assert parts["n_rep_pairs"].item() == 0
+    assert torch.isfinite(parts["delta_repulsion_mean"])  # 0.0, not NaN
+    assert parts["loss_aux"].item() == pytest.approx(
+        crit.lambda_align * parts["loss_align"].item(), rel=1e-6
+    )
 
 
 def test_local_term_weighted_into_aux():
@@ -193,7 +224,9 @@ def test_source_gets_no_auxiliary_gradient():
     _, parts = crit(fs, logits_s, ls, ft, lt)
     parts["loss_aux"].backward()
 
-    assert torch.all(fs.grad == 0)
+    # Lean v2: with beta=gamma=0 no path reaches the source at all (grad None);
+    # with the safeguards active the path exists but carries exact zeros.
+    assert fs.grad is None or torch.all(fs.grad == 0)
     assert ft.grad is not None
 
 

@@ -2,8 +2,12 @@
 
 Same loop as the original DARES engine (warm-up, dual-domain batches,
 GradNorm-lite trust region on the reference parameters) but wired to
-:class:`dares.losses.dares_loss_v2.DARESLossV2`, which adds the bounded
-class-global term, the local correspondence term and soft class weights.
+:class:`dares.losses.dares_loss_v2.DARESLossV2`. The v2 headline configs run
+LEAN: bounded class-global + local correspondence + soft class weights +
+Renyi-EM, with the anti-collapse floor and inter-class repulsion disabled
+(``beta: 0``, ``repulsion_gamma: 0``) since the bounded global and local
+terms subsume them; the ``with_ac`` / ``with_rep`` ablations re-enable them
+as insurance.
 """
 
 from dares.engines.dares import DARESTrainer

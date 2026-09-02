@@ -15,9 +15,18 @@ reference implementation (``Domain_Adaptation/src/MIL_CREDA``):
      itself towards a confidence-weighted, softmax-personalized reference
      built from the source pixels of its class, measured as a squared RKHS
      distance computed entirely from kernel evaluations.
-  3. Soft class weights (Eq. 29): target pixels are weighted by their full
-     softmax mass for the class, not just the hard argmax pseudo-label, so
-     ambiguous pixels contribute less to the conditional geometry.
+   3. Soft class weights (Eq. 29): target pixels are weighted by their full
+      softmax mass for the class, not just the hard argmax pseudo-label, so
+      ambiguous pixels contribute less to the conditional geometry.
+
+The v2 essence is LEAN by default: the bounded global term subsumes the
+anti-collapse floor (it directly rewards within-class diversity, so the
+``eta_floor`` / ``entropy_gap`` patches that v1 needed against its ReLU dead
+zone are redundant), and the local correspondence subsumes inter-class
+repulsion (each pixel is anchored to the reference of ITS class, so classes
+separate implicitly). Hence ``beta`` and ``gamma`` default to 0.0 in v2;
+both safeguards stay available as insurance (set them > 0) and their whole
+computation is skipped when their weight is zero.
 
 Also fixes the V1 edge cases: an explicit ``num_classes >= 2`` guard and an
 optional supervised-term normalization by its exact supremum (Eq. 18).
@@ -32,7 +41,7 @@ from dares.losses.dares_loss import DARESLoss
 
 
 class DARESLossV2(DARESLoss):
-    """MIL-CREDA hardened Renyi-2 alignment loss (bounded global + local)."""
+    """MIL-CREDA hardened Renyi-2 alignment loss (lean: bounded global + local)."""
 
     def __init__(
         self,
@@ -44,6 +53,10 @@ class DARESLossV2(DARESLoss):
         normalize_seg: bool = False,
         **kwargs,
     ) -> None:
+        # Lean composition (see module docstring): anti-collapse and
+        # repulsion are opt-in insurance in v2, not defaults.
+        kwargs.setdefault("beta", 0.0)
+        kwargs.setdefault("gamma", 0.0)
         super().__init__(*args, **kwargs)
         if self.num_classes < 2:
             raise ValueError(
@@ -211,16 +224,17 @@ class DARESLossV2(DARESLoss):
                     s2_s, tr_s, s2_t, tr_t, s2_st, H_s, H_t, float(xs.shape[0]), n_eff_t
                 )
 
-                floor_s = F.relu(H_s.new_tensor(self.eta_floor) - H_s)
-                floor_t = F.relu(H_s.detach() - self.entropy_gap - H_t)
-
                 align_terms.append(d_c)
-                ac_terms.append(floor_s + floor_t)
+                if self.beta > 0.0:
+                    floor_s = F.relu(H_s.new_tensor(self.eta_floor) - H_s)
+                    floor_t = F.relu(H_s.detach() - self.entropy_gap - H_t)
+                    ac_terms.append(floor_s + floor_t)
                 if self.lambda_local > 0.0:
                     loc_terms.append(self._local_term(K_s, K_st, wc))
-                t_feats.append(xt)
-                t_weights.append(wc)
-                t_sigmas.append(sig)
+                if self.gamma > 0.0:
+                    t_feats.append(xt)
+                    t_weights.append(wc)
+                    t_sigmas.append(sig)
                 h2s_list.append(H_s.detach())
                 h2t_list.append(H_t.detach())
                 dal_list.append(delta_c.detach())
@@ -268,7 +282,9 @@ class DARESLossV2(DARESLoss):
                 n_pairs = int(deltas.numel())
             else:
                 loss_rep = zero
-                rep_mean = fs.new_tensor(float("nan"))
+                rep_mean = (
+                    zero if self.gamma == 0.0 else fs.new_tensor(float("nan"))
+                )
                 n_pairs = 0
 
             loss_aux = (

@@ -40,8 +40,8 @@ training:
   ramp_delta: 10.0
 
   # Hiperparámetros de pérdidas DARES
-  beta: 1.0                   # Peso del piso anti-colapso (L_ac)
-  repulsion_gamma: 0.94        # Peso de repulsión inter-clase (L_rep) leído por dares.py
+  beta: 0.0                   # v2 LEAN: el global acotado subsume el piso (seguro: >0)
+  repulsion_gamma: 0.0        # v2 LEAN: la correspondencia local subsume la repulsión (seguro: >0)
   eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
   entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
   repulsion_margin: 0.2       # Margen hinge de separación (bits)
@@ -61,7 +61,7 @@ training:
   lambda_local: 0.5           # Peso del término de correspondencia local (Ec. 38)
   tau_local: 1.0              # Temperatura del softmax de correspondencia (Ec. 28)
   soft_class_weights: true    # Peso target = confianza x masa suave de clase (Ec. 29)
-  bounded_align: false        # Ablación: ReLU(delta) de v1 + término local
+  bounded_align: false        # Ablación: ReLU(delta) de v1 en el global, sobre base lean
   normalize_seg: false        # Dividir L_seg por su supremo ln(1+1/eps) (Ec. 18)
 
 experiment:

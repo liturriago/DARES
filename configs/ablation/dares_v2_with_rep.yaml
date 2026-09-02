@@ -41,7 +41,7 @@ training:
 
   # Hiperparámetros de pérdidas DARES
   beta: 0.0                   # v2 LEAN: el global acotado subsume el piso (seguro: >0)
-  repulsion_gamma: 0.0        # v2 LEAN: la correspondencia local subsume la repulsión (seguro: >0)
+  repulsion_gamma: 0.94        # Seguro: re-activa la repulsión inter-clase sobre la base lean
   eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
   entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
   repulsion_margin: 0.2       # Margen hinge de separación (bits)
@@ -59,13 +59,13 @@ training:
 
   # DARES v2 (mejoras MIL-CREDA)
   lambda_local: 0.5           # Peso del término de correspondencia local (Ec. 38)
-  tau_local: 0.3              # Sweep: correspondencia local intermedia
+  tau_local: 1.0              # Temperatura del softmax de correspondencia (Ec. 28)
   soft_class_weights: true    # Peso target = confianza x masa suave de clase (Ec. 29)
   bounded_align: true         # Global acotado [0,1] por cotas conservativas (Ecs. 34-36)
   normalize_seg: false        # Dividir L_seg por su supremo ln(1+1/eps) (Ec. 18)
 
 experiment:
-  name: "dares_v2_tau_0.3"
+  name: "dares_v2_with_rep"
   version: 1
-  output_dir: "outputs/ablation/dares_v2_tau_0.3/experiment_1"
+  output_dir: "outputs/ablation/dares_v2_with_rep/experiment_1"
   save_results: true
