@@ -17,6 +17,9 @@ outputs/
 env/
 venv/
 
+# Domain AdaptationS
+/Domain_Adaptation
+
 # Notebooks
 .ipynb_checkpoints
 

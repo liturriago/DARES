@@ -68,7 +68,7 @@ def test_registry_unknown_method():
 def test_registry_mapping():
     """Every registered method maps to a BaseTrainer subclass."""
     for name in METHODS:
-        assert name in {"source_only", "advent", "cbst", "clan", "dacs", "fda", "dares"}
+        assert name in {"source_only", "advent", "cbst", "clan", "dacs", "fda", "dares", "dares_v2"}
         engine_cls = ENGINES[name]
         assert issubclass(engine_cls, BaseTrainer)
 

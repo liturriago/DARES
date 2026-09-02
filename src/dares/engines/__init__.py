@@ -13,6 +13,8 @@ loop). Available methods:
 * ``dacs``         ->  cross-domain mixed sampling self-training.
 * ``fda``          ->  Fourier Domain Adaptation (spectral amplitude swap).
 * ``dares``        ->  Domain Adaptation via alpha-Renyi Entropy.
+* ``dares_v2``     ->  DARES with MIL-CREDA hardening (bounded global term,
+   local correspondence, soft class weights).
 
 Use ``build_engine(name, model, source_loaders, target_loaders, config,
 device)`` to instantiate an engine.

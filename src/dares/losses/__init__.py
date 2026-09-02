@@ -20,6 +20,9 @@ Method-specific losses live in sibling modules:
   engine).
 * ``dares_loss``  ->  the hardened DARES alignment loss (anti-collapse entropy
   floors, inter-class target repulsion and a GradNorm-lite trust region).
+* ``dares_loss_v2``  ->  DARES v2 (MIL-CREDA hardening: bounded class-global
+  term via the mixed matrix and conservative entropy bounds, local
+  correspondence to a personalized source reference, soft class weights).
 """
 from dares.losses.ce import SegCrossEntropyLoss
 

@@ -101,9 +101,16 @@ class TrainConfig(BaseModel):
     em_pool: bool = False
     em_pool_kernel: int = Field(default=3, gt=0)
 
+    # DARES v2 (mejoras MIL-CREDA)
+    lambda_local: float = Field(default=0.5, ge=0.0)
+    tau_local: float = Field(default=1.0, gt=0.0)
+    soft_class_weights: bool = True
+    bounded_align: bool = True
+    normalize_seg: bool = False
+
     # Method selection
     method: Literal[
-        "source_only", "advent", "cbst", "dacs", "fda", "dares", "clan"
+        "source_only", "advent", "cbst", "dacs", "fda", "dares", "dares_v2", "clan"
     ] = "dares"
 
     # ADVENT

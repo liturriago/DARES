@@ -9,6 +9,7 @@ from dares.engines.cbst import CBSTTrainer
 from dares.engines.clan import CLANTrainer
 from dares.engines.dacs import DACSTrainer
 from dares.engines.dares import DARESTrainer
+from dares.engines.dares_v2 import DARESV2Trainer
 from dares.engines.fda import FDATrainer
 from dares.engines.source_only import SourceOnlyTrainer
 
@@ -20,6 +21,7 @@ ENGINES: dict[str, type] = {
     "dacs": DACSTrainer,
     "fda": FDATrainer,
     "dares": DARESTrainer,
+    "dares_v2": DARESV2Trainer,
 }
 
 
@@ -39,7 +41,8 @@ def build_engine(
 
     Args:
         name (str): Method name, one of ``"source_only"``, ``"advent"``,
-            ``"cbst"``, ``"clan"``, ``"dacs"``, ``"fda"`` or ``"dares"``.
+            ``"cbst"``, ``"clan"``, ``"dacs"``, ``"fda"``, ``"dares"`` or
+            ``"dares_v2"``.
         model (nn.Module): The segmentation model.
         source_loaders (dict[str, DataLoader]): Labeled source loaders.
         target_loaders (dict[str, DataLoader]): Target loaders (train is

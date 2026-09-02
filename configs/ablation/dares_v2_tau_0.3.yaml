@@ -1,0 +1,71 @@
+data:
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Medium"
+  target_variant: "medium"
+  batch_size: 8
+  patch_size: 224
+  num_workers: 4
+  mean: [0.0, 0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0, 1.0]
+  use_augmentation: true
+
+model:
+  backbone: "resnet50"
+  head: "resunet"
+  in_channels: 4
+  num_classes: 2
+  pretrained: true
+  dropout_rate: 0.1
+
+training:
+  method: "dares_v2"
+  epochs: 25
+  lr: 0.0001
+  weight_decay: 0.00001
+  gamma: 0.94                 # LR Scheduler: decaimiento multiplicativo por época (BaseTrainer)
+  use_amp: true
+  device: "cuda"
+  seed: 42
+  warmup_epochs: 2
+
+  # Hiperparámetros de cuota
+  quota: 256
+  min_samples: 8
+
+  # Ponderación y rampas de alineación
+  lambda_max: 10.0
+  lambda_align: 1.0         # Peso de alineación (0 desactiva solo L_align)
+  warmup_steps: 1000
+  ramp_steps: 4000
+  ramp_delta: 10.0
+
+  # Hiperparámetros de pérdidas DARES
+  beta: 1.0                   # Peso del piso anti-colapso (L_ac)
+  repulsion_gamma: 0.94        # Peso de repulsión inter-clase (L_rep) leído por dares.py
+  eta_floor: 1.0              # Piso de entropía espectral absoluta (bits)
+  entropy_gap: 0.25           # Brecha permitida entre fuente y objetivo (bits)
+  repulsion_margin: 0.2       # Margen hinge de separación (bits)
+
+  # Control de gradiente
+  trust_region: true          # GradNorm-lite EMA activo
+  grad_ratio: 0.8             # Límite rho (||g_aux|| <= 0.8 * ||g_seg||)
+  ema_decay: 0.9              # Inercia de la media móvil de gradientes
+
+  # Regularización densa Rényi-EM
+  use_renyi_em: true          # Minimización densa en predicciones objetivo
+  lambda_em: 0.05             # Peso desacoplado de Rényi-EM
+  em_pool: false              # Pooling espacial del mapa de confianza
+  em_pool_kernel: 3
+
+  # DARES v2 (mejoras MIL-CREDA)
+  lambda_local: 0.5           # Peso del término de correspondencia local (Ec. 38)
+  tau_local: 0.3              # Sweep: correspondencia local intermedia
+  soft_class_weights: true    # Peso target = confianza x masa suave de clase (Ec. 29)
+  bounded_align: true         # Global acotado [0,1] por cotas conservativas (Ecs. 34-36)
+  normalize_seg: false        # Dividir L_seg por su supremo ln(1+1/eps) (Ec. 18)
+
+experiment:
+  name: "dares_v2_tau_0.3"
+  version: 1
+  output_dir: "outputs/ablation/dares_v2_tau_0.3/experiment_1"
+  save_results: true
