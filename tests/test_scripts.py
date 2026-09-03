@@ -195,7 +195,7 @@ def test_check_data_script(tmp_path, capsys):
 METHODS = ["source_only", "advent", "cbst", "dares"]
 LIME_LEVELS = {"low": "low", "medium": "medium", "high": "high"}
 ARCH_COMBOS = {
-    "convnext_resunet": ("convnext_tiny", "resunet"),
+    "convnext_tiny_resunet": ("convnext_tiny", "resunet"),
     "convnext_tiny_deeplabv3p": ("convnext_tiny", "deeplabv3p"),
     "resnet50_deeplabv3p": ("resnet50", "deeplabv3p"),
     "swin_t_deeplabv3p": ("swin_t", "deeplabv3p"),
