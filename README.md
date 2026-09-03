@@ -1,7 +1,7 @@
 ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
 
-# DARES: Domain Adaptation via α-Rényi Entropy for Semantic Segmentation
+# DARES: Rényi-Entropy Domain Adaptation for Forest Deforestation Segmentation
 
 Unsupervised Domain Adaptation (UDA) framework for **dense semantic segmentation** applied to tropical rainforest **deforestation mapping**.
 
@@ -239,7 +239,7 @@ If you use this framework, please cite the DARES paper:
 
 ```bibtex
 @article{iturriago2026dares,
-  title   = {DARES: Domain Adaptation via $\alpha$-R\'enyi Entropy for Semantic Segmentation},
+  title   = {DARES: Rényi-Entropy Domain Adaptation for Forest Deforestation Segmentation},
   author  = {Iturriago Salas, Lucas Miguel and Collazos Huertas, Diego Fabi\'an and
              Alvarez Meza, Andres Marino and Lozada Das Dores, Angel Jose and
              Romero S\'anchez, Alexander and L\'opez, Juan Diego and
