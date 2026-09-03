@@ -148,23 +148,51 @@ def test_infer_script_end_to_end(tmp_path):
     )
 
     out = Path(infer_dir)
+    stem = "source_test_idx1"
     for name in (
-        "source_test_prediction.png",
-        "source_test_prediction.npy",
-        "source_test_probability.npy",
-        "source_test_probability.png",
-        "source_test_overlay.png",
+        f"{stem}_prediction.png",
+        f"{stem}_prediction.npy",
+        f"{stem}_probability.npy",
+        f"{stem}_probability.png",
+        f"{stem}_groundtruth.png",
+        f"{stem}_groundtruth.npy",
+        f"{stem}_metrics.json",
+        f"{stem}_overlay.png",
     ):
         assert (out / name).is_file(), name
 
-    mask = np.load(out / "source_test_prediction.npy")
+    mask = np.load(out / f"{stem}_prediction.npy")
     assert mask.shape == (64, 64)
     assert set(np.unique(mask)) <= {0, 1}
-    prob = np.load(out / "source_test_probability.npy")
+    prob = np.load(out / f"{stem}_probability.npy")
     assert prob.shape == (64, 64)
     assert 0.0 <= float(prob.min()) and float(prob.max()) <= 1.0
+    gt = np.load(out / f"{stem}_groundtruth.npy")
+    with h5py.File(tmp_path / "source_test.h5", "r") as f:
+        assert np.array_equal(gt, f["masks"][1])
+    with open(out / f"{stem}_metrics.json") as f:
+        metrics = json.load(f)
+    assert 0.0 <= metrics["mIoU"] <= 1.0
 
-    # NumPy image input with fewer bands than the model: zero-padded, no error.
+    # --all sweeps the whole container and writes the summary JSON.
+    all_dir = str(tmp_path / "inference_all")
+    infer_main(
+        str(config_path),
+        str(model_path),
+        str(tmp_path / "source_test.h5"),
+        all_patches=True,
+        output_dir=all_dir,
+        device="cpu",
+    )
+    all_out = Path(all_dir)
+    for i in range(3):
+        assert (all_out / f"source_test_idx{i}_prediction.npy").is_file()
+    with open(all_out / "inference_summary.json") as f:
+        summary = json.load(f)
+    assert len(summary["patches"]) == 3
+    assert "mIoU" in summary["mean"]
+
+    # NumPy image input with fewer bands than the model: zero-padded, no GT.
     np_path = tmp_path / "scene.npy"
     np.save(np_path, np.random.rand(2, 64, 64).astype(np.float32))
     infer_main(
@@ -175,6 +203,7 @@ def test_infer_script_end_to_end(tmp_path):
         device="cpu",
     )
     assert (tmp_path / "inference_npy" / "scene_prediction.npy").is_file()
+    assert not (tmp_path / "inference_npy" / "scene_groundtruth.npy").exists()
 
 
 def test_check_data_script(tmp_path, capsys):
