@@ -158,12 +158,17 @@ def test_infer_script_end_to_end(tmp_path):
         f"{stem}_groundtruth.npy",
         f"{stem}_metrics.json",
         f"{stem}_overlay.png",
+        f"{stem}_input.png",
+        f"{stem}_nir.png",
+        f"{stem}_nir.npy",
     ):
         assert (out / name).is_file(), name
 
     mask = np.load(out / f"{stem}_prediction.npy")
     assert mask.shape == (64, 64)
     assert set(np.unique(mask)) <= {0, 1}
+    nir = np.load(out / f"{stem}_nir.npy")
+    assert nir.shape == (64, 64) and nir.dtype == np.float32
     prob = np.load(out / f"{stem}_probability.npy")
     assert prob.shape == (64, 64)
     assert 0.0 <= float(prob.min()) and float(prob.max()) <= 1.0

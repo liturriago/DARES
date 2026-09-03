@@ -3,8 +3,9 @@ Command-line script to run single-image inference with a trained DARES model.
 
 Loads the weights from a checkpoint into the configured segmentation model,
 runs dense inference on one image (or every patch of an HDF5 container with
-``--all``) and saves the prediction artifacts: the hard mask (PNG + NPY),
-the forest-probability heatmap (PNG + NPY), the ground-truth mask when the
+``--all``) and saves the prediction artifacts: the input image (RGB composite
+PNG) and its NIR band (PNG + NPY), the hard mask (PNG + NPY), the
+forest-probability heatmap (PNG + NPY), the ground-truth mask when the
 container carries one (PNG + NPY), a qualitative overlay figure and a
 per-patch metrics JSON.
 
@@ -210,6 +211,23 @@ def save_artifacts(
 
     overlay_path = output_dir / f"{stem}_overlay.png"
     rgb = _rgb_composite(image)
+
+    input_path = output_dir / f"{stem}_input.png"
+    Image.fromarray((rgb * 255).round().astype(np.uint8), mode="RGB").save(input_path)
+    paths.append(input_path)
+
+    if image.shape[0] > 3:
+        nir = image[3].numpy()
+        lo, hi = np.percentile(nir, 2), np.percentile(nir, 98)
+        nir_stretched = np.clip((nir - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+        nir_png = output_dir / f"{stem}_nir.png"
+        Image.fromarray((nir_stretched * 255).round().astype(np.uint8), mode="L").save(
+            nir_png
+        )
+        nir_npy = output_dir / f"{stem}_nir.npy"
+        np.save(nir_npy, nir.astype(np.float32))
+        paths.extend([nir_png, nir_npy])
+
     forest = prediction.numpy() == 1
     blended = rgb.copy()
     blended[forest] = 0.55 * blended[forest] + 0.45 * np.array([0.0, 0.8, 0.2])
@@ -317,7 +335,7 @@ def main(
         metrics = None
         if ground_truth is not None:
             metrics = patch_metrics(
-                prediction.numpy(), ground_truth, cfg.model.num_classes
+                prediction.cpu().numpy(), ground_truth, cfg.model.num_classes
             )
 
         stem = f"{path.stem}_idx{i}" if path.suffix.lower() == ".h5" else path.stem
