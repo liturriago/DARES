@@ -36,11 +36,13 @@ class CBSTPseudoLabeling(nn.Module):
         num_classes: int,
         topk_ratio: float = 0.5,
         threshold: float = 0.9,
+        ignore_index: int = 255,
     ) -> None:
         super().__init__()
         self.num_classes = num_classes
         self.topk_ratio = topk_ratio
         self.threshold = threshold
+        self.ignore_index = int(ignore_index)
 
     def forward(
         self, logits: torch.Tensor
@@ -109,9 +111,10 @@ class CBSTSelfTrainingLoss(nn.Module):
         zero when no pixel is selected (default ``1e-8``).
     """
 
-    def __init__(self, eps: float = 1e-8) -> None:
+    def __init__(self, eps: float = 1e-8, ignore_index: int = 255) -> None:
         super().__init__()
         self.eps = eps
+        self.ignore_index = int(ignore_index)
 
     def forward(
         self,
@@ -136,6 +139,9 @@ class CBSTSelfTrainingLoss(nn.Module):
             Scalar masked mean loss; ``0.0`` when no pixel is selected.
         """
         per_pixel = (
-            F.cross_entropy(logits, pseudo_labels, reduction="none") * weights
+            F.cross_entropy(
+                logits, pseudo_labels, reduction="none", ignore_index=self.ignore_index
+            )
+            * weights
         )
         return per_pixel.sum() / (weights.sum() + self.eps)

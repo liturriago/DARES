@@ -62,6 +62,7 @@ class DARESTrainer(BaseTrainer):
         config = self.config
         return {
             "num_classes": self.num_classes,
+            "ignore_index": self.ignore_index,
             "quota": getattr(config, "quota", 256),
             "min_samples": getattr(config, "min_samples", 8),
             "lambda_max": getattr(config, "lambda_max", 1.0),
@@ -113,7 +114,9 @@ class DARESTrainer(BaseTrainer):
             imgs, masks = batch[0].to(self.device), batch[1].to(self.device)
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 logits = self.model(imgs, mode="class")
-                loss_seg = F.cross_entropy(logits, masks, ignore_index=255)
+                loss_seg = F.cross_entropy(
+                    logits, masks, ignore_index=self.ignore_index
+                )
 
             # Actualiza el EMA de gradiente supervisado desde el paso 1
             self.criterion.update_lambda(loss_seg, None, self.ref_params)

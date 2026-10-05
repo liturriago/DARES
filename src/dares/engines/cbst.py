@@ -63,13 +63,14 @@ class CBSTTrainer(BaseTrainer):
     ) -> None:
         """Initializes the losses, the pseudo-labeler and the optimizer."""
         super().__init__(model, source_loaders, target_loaders, config, device)
-        self.criterion = SegCrossEntropyLoss()
+        self.criterion = SegCrossEntropyLoss(ignore_index=self.ignore_index)
         self.pseudo_labeler = CBSTPseudoLabeling(
             self.num_classes,
             topk_ratio=config.pseudo_topk_ratio,
             threshold=config.pseudo_threshold,
+            ignore_index=self.ignore_index,
         )
-        self.self_loss = CBSTSelfTrainingLoss()
+        self.self_loss = CBSTSelfTrainingLoss(ignore_index=self.ignore_index)
         self.optimizer = self._make_optimizer(self.model.parameters())
 
     def train_epoch(self) -> dict[str, float]:

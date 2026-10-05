@@ -66,6 +66,7 @@ class BaseTrainer(ABC):
 
         self.num_classes = int(model.head.num_classes)
         self.class_names = self._resolve_class_names()
+        self.ignore_index = int(getattr(config, "ignore_index", 255))
 
         self.use_amp = bool(config.use_amp and device.type == "cuda")
         self.scaler = GradScaler(enabled=self.use_amp)
@@ -230,6 +231,7 @@ class BaseTrainer(ABC):
             self.class_names,
             use_amp=self.use_amp,
             prefix=prefix,
+            ignore_index=self.ignore_index,
         )
         return float(metrics["mIoU"])
 

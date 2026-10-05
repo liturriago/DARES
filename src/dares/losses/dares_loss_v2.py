@@ -150,7 +150,9 @@ class DARESLossV2(DARESLoss):
         logits_t: torch.Tensor,
     ):
         """Computes the total DARES v2 loss in float32."""
-        loss_seg = F.cross_entropy(logits_s, labels_s, ignore_index=255)
+        loss_seg = F.cross_entropy(
+            logits_s, labels_s, ignore_index=self.ignore_index
+        )
         if self.normalize_seg:
             loss_seg = loss_seg / self._source_bound()
 

@@ -61,8 +61,8 @@ class ADVENTTrainer(BaseTrainer):
         device: torch.device,
     ) -> None:
         super().__init__(model, source_loaders, target_loaders, config, device)
-        self.criterion = SegCrossEntropyLoss()
-        self.entropy_loss = EntropyLoss()
+        self.criterion = SegCrossEntropyLoss(ignore_index=self.ignore_index)
+        self.entropy_loss = EntropyLoss(ignore_index=self.ignore_index)
         self.discriminator = DomainDiscriminator(in_channels=1).to(device)
         self.optimizer = self._make_optimizer(self.model.parameters())
         self.optimizer_d = self._make_optimizer(
@@ -109,7 +109,7 @@ class ADVENTTrainer(BaseTrainer):
                 logits_s = self.model(imgs_s, mode="class")
                 logits_t = self.model(imgs_t, mode="class")
 
-            e_s = entropy_map(logits_s)
+            e_s = entropy_map(logits_s, masks_s, self.ignore_index)
             e_t = entropy_map(logits_t)
 
             d_s = self.discriminator(e_s.detach())

@@ -23,12 +23,48 @@ from dares.models import build_model
 from dares.training.schedulers import build_scheduler
 from dares.utils.evaluation import evaluate_segmentation, metrics_to_jsonable
 from dares.utils.reproducibility import set_seed
+from dares.utils.ttest import format_result, per_sample_miou_scores, run_ttest
+
+
+def run_domain_gap_ttest(cfg, trained_model, source_loader, target_loader, device):
+    """Welch/student per-patch mIoU domain-gap test; returns JSONable dict."""
+    a = per_sample_miou_scores(
+        trained_model,
+        source_loader,
+        device,
+        cfg.model.num_classes,
+        ignore_index=cfg.training.ignore_index,
+        use_amp=cfg.training.use_amp,
+    )
+    b = per_sample_miou_scores(
+        trained_model,
+        target_loader,
+        device,
+        cfg.model.num_classes,
+        ignore_index=cfg.training.ignore_index,
+        use_amp=cfg.training.use_amp,
+    )
+    result = run_ttest(
+        a,
+        b,
+        test=cfg.stats.test if cfg.stats.test != "paired" else "welch",
+        alpha=cfg.stats.alpha,
+        alternative=cfg.stats.alternative,
+        min_samples=cfg.stats.min_samples,
+    )
+    print(format_result(result))
+    return {
+        "comparison": "source_test_vs_target_test",
+        "metric": "per_patch_miou",
+        **result.to_dict(),
+    }
 
 
 def main(
     config_path: str,
     method: str | None = None,
     device: str | None = None,
+    enable_ttest: bool | None = None,
 ) -> None:
     """Trains the method configured in the YAML and saves the best checkpoint.
 
@@ -40,6 +76,8 @@ def main(
     cfg = ExperimentConfig.from_yaml(config_path)
     if method is not None:
         cfg.training = TrainConfig(**cfg.training.model_dump(), method=method)
+    if enable_ttest is not None:
+        cfg.stats.enabled = bool(enable_ttest)
 
     device_name = cfg.training.device if torch.cuda.is_available() else "cpu"
     if device is not None:
@@ -93,6 +131,7 @@ def main(
         engine.class_names,
         use_amp=cfg.training.use_amp,
         prefix="TARGET TEST",
+        ignore_index=cfg.training.ignore_index,
     )
     source_metrics = evaluate_segmentation(
         trained_model,
@@ -102,6 +141,7 @@ def main(
         engine.class_names,
         use_amp=cfg.training.use_amp,
         prefix="SOURCE TEST",
+        ignore_index=cfg.training.ignore_index,
     )
     with open(output_dir / "test_metrics.json", "w") as f:
         json.dump(
@@ -112,6 +152,16 @@ def main(
             f,
             indent=2,
         )
+    if cfg.stats.enabled:
+        print("\n Running per-patch mIoU t-test (source vs target)...")
+        try:
+            ttest = run_domain_gap_ttest(
+                cfg, trained_model, source_loaders["test"], target_loaders["test"], device
+            )
+            with open(output_dir / "test_ttest.json", "w") as f:
+                json.dump(ttest, f, indent=2)
+        except ValueError as exc:
+            print(f"[t-test] skipped: {exc}")
     print(f"\n Experiment completed. Results saved in: {output_dir}")
 
 
@@ -137,5 +187,12 @@ if __name__ == "__main__":
         default=None,
         help="Override the device (cuda / cpu)",
     )
+    parser.add_argument(
+        "--ttest",
+        dest="enable_ttest",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force per-patch mIoU t-test on/off (overrides stats.enabled)",
+    )
     args = parser.parse_args()
-    main(args.config, args.method, args.device)
+    main(args.config, args.method, args.device, args.enable_ttest)

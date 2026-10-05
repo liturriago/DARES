@@ -66,6 +66,7 @@ class TrainConfig(BaseModel):
     use_amp: bool = True
     device: Literal["cuda", "cpu", "mps"] = "cuda"
     seed: int = 42
+    ignore_index: int = Field(default=255, ge=0)
 
     # Warm-up
     warmup_epochs: Optional[int] = None
@@ -158,6 +159,17 @@ class ExperimentMetadata(BaseModel):
     save_results: bool = False
 
 
+class StatsConfig(BaseModel):
+    """Configuration for per-patch t-test significance reporting."""
+
+    enabled: bool = False
+    test: Literal["welch", "student", "paired"] = "welch"
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    min_samples: int = Field(default=8, ge=2)
+    alternative: Literal["two-sided", "greater", "less"] = "two-sided"
+    compare_checkpoint: Optional[str] = None
+
+
 class ExperimentConfig(BaseModel):
     """Global schema that unites all configurations."""
 
@@ -165,6 +177,7 @@ class ExperimentConfig(BaseModel):
     model: ModelConfig
     training: TrainConfig
     experiment: ExperimentMetadata
+    stats: StatsConfig = Field(default_factory=StatsConfig)
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "ExperimentConfig":

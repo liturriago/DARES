@@ -26,6 +26,7 @@ class DARESLoss(nn.Module):
         num_classes: int = 2,
         quota: int = 256,
         min_samples: int = 8,
+        ignore_index: int = 255,
         lambda_max: float = 1.0,
         lambda_align: float = 1.0,
         beta: float = 1.0,
@@ -51,6 +52,7 @@ class DARESLoss(nn.Module):
     ) -> None:
         super().__init__()
         self.num_classes = int(num_classes)
+        self.ignore_index = int(ignore_index)
         self.quota = int(quota)
         self.min_samples = int(min_samples)
         self.lambda_max = float(lambda_max)
@@ -171,7 +173,9 @@ class DARESLoss(nn.Module):
         logits_t: torch.Tensor,
     ):
         """Computes total DARES loss in float32."""
-        loss_seg = F.cross_entropy(logits_s, labels_s, ignore_index=255)
+        loss_seg = F.cross_entropy(
+            logits_s, labels_s, ignore_index=self.ignore_index
+        )
 
         dev = feat_s.device
         with torch.autocast(device_type=dev.type, enabled=False):

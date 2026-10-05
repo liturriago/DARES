@@ -22,13 +22,29 @@ from dares.data.loader import DARESDataLoader
 from dares.models import build_model
 from dares.utils.evaluation import evaluate_segmentation, metrics_to_jsonable
 from dares.utils.reproducibility import set_seed
+from dares.utils.ttest import (
+    format_result,
+    per_sample_miou_scores,
+    run_ttest,
+)
 from dares.utils.visualizer import SegmentationVisualizer
+
+
+def _load_model(cfg, model_path: str, device):
+    model = build_model(cfg.model)
+    state = torch.load(model_path, map_location=device, weights_only=True)
+    if isinstance(state, dict) and "model" in state:
+        state = state["model"]
+    model.load_state_dict(state)
+    return model.to(device)
 
 
 def main(
     config_path: str,
     model_path: str,
     output_dir: str | None = None,
+    compare_model: str | None = None,
+    enable_ttest: bool | None = None,
 ) -> None:
     """Evaluates a trained checkpoint on the source and target test splits.
 
@@ -36,10 +52,17 @@ def main(
         config_path (str): Path to the YAML configuration file.
         model_path (str): Path to the trained checkpoint (``model_final.pth``).
         output_dir (str | None): Optional override for ``experiment.output_dir``.
+        compare_model (str | None): Optional second checkpoint; runs a paired
+            per-patch mIoU t-test (same target-test patches) between the two.
+        enable_ttest (bool | None): Force the domain-gap t-test on/off,
+            overriding ``stats.enabled``.
     """
     cfg = ExperimentConfig.from_yaml(config_path)
     if output_dir is not None:
         cfg.experiment.output_dir = Path(output_dir)
+    if enable_ttest is not None:
+        cfg.stats.enabled = bool(enable_ttest)
+    compare_path = compare_model or cfg.stats.compare_checkpoint
 
     device = torch.device(
         cfg.training.device if torch.cuda.is_available() else "cpu"
@@ -55,12 +78,7 @@ def main(
     target_loaders = data_manager.get_target_loaders()
 
     # 2. Model + weights
-    model = build_model(cfg.model)
-    state = torch.load(model_path, map_location=device, weights_only=True)
-    if isinstance(state, dict) and "model" in state:
-        state = state["model"]
-    model.load_state_dict(state)
-    model = model.to(device)
+    model = _load_model(cfg, model_path, device)
 
     class_names = ["non_forest", "forest"]
     for loader in (source_loaders["train"], target_loaders["train"]):
@@ -79,6 +97,7 @@ def main(
         class_names,
         use_amp=cfg.training.use_amp,
         prefix="SOURCE TEST",
+        ignore_index=cfg.training.ignore_index,
     )
     target_metrics = evaluate_segmentation(
         model,
@@ -88,6 +107,7 @@ def main(
         class_names,
         use_amp=cfg.training.use_amp,
         prefix="TARGET TEST",
+        ignore_index=cfg.training.ignore_index,
     )
 
     # 4. Artifacts
@@ -117,6 +137,84 @@ def main(
         use_amp=cfg.training.use_amp,
     )
 
+    # 5. Optional significance testing (per-patch mIoU).
+    ttests: dict = {}
+    if cfg.stats.enabled:
+        print("\n Running per-patch mIoU t-test (source vs target)...")
+        try:
+            src_scores = per_sample_miou_scores(
+                model,
+                source_loaders["test"],
+                device,
+                cfg.model.num_classes,
+                ignore_index=cfg.training.ignore_index,
+                use_amp=cfg.training.use_amp,
+            )
+            tgt_scores = per_sample_miou_scores(
+                model,
+                target_loaders["test"],
+                device,
+                cfg.model.num_classes,
+                ignore_index=cfg.training.ignore_index,
+                use_amp=cfg.training.use_amp,
+            )
+            kind = cfg.stats.test if cfg.stats.test != "paired" else "welch"
+            res = run_ttest(
+                src_scores,
+                tgt_scores,
+                test=kind,
+                alpha=cfg.stats.alpha,
+                alternative=cfg.stats.alternative,
+                min_samples=cfg.stats.min_samples,
+            )
+            print(format_result(res))
+            ttests["source_vs_target"] = {
+                "comparison": "source_test_vs_target_test",
+                "metric": "per_patch_miou",
+                **res.to_dict(),
+            }
+        except ValueError as exc:
+            print(f"[t-test] skipped: {exc}")
+    if compare_path is not None:
+        print(f"\n Running paired t-test vs {compare_path} (target test)...")
+        try:
+            other = _load_model(cfg, compare_path, device)
+            a = per_sample_miou_scores(
+                model,
+                target_loaders["test"],
+                device,
+                cfg.model.num_classes,
+                ignore_index=cfg.training.ignore_index,
+                use_amp=cfg.training.use_amp,
+            )
+            b = per_sample_miou_scores(
+                other,
+                target_loaders["test"],
+                device,
+                cfg.model.num_classes,
+                ignore_index=cfg.training.ignore_index,
+                use_amp=cfg.training.use_amp,
+            )
+            res = run_ttest(
+                a,
+                b,
+                test="paired",
+                alpha=cfg.stats.alpha,
+                alternative=cfg.stats.alternative,
+                min_samples=cfg.stats.min_samples,
+            )
+            print(format_result(res))
+            ttests["model_vs_compare"] = {
+                "comparison": "model_vs_compare_on_target_test",
+                "metric": "per_patch_miou",
+                **res.to_dict(),
+            }
+        except ValueError as exc:
+            print(f"[t-test] paired skipped: {exc}")
+    if ttests:
+        with open(output_path / "evaluation_ttest.json", "w") as f:
+            json.dump(ttests, f, indent=2)
+
     print(f"\n Evaluation complete. Results saved in: {output_path}")
 
 
@@ -134,5 +232,18 @@ if __name__ == "__main__":
         default=None,
         help="Override the output directory defined in the YAML config",
     )
+    parser.add_argument(
+        "--compare",
+        type=str,
+        default=None,
+        help="Second checkpoint for a paired per-patch mIoU t-test",
+    )
+    parser.add_argument(
+        "--ttest",
+        dest="enable_ttest",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Force the source-vs-target t-test on/off (overrides stats.enabled)",
+    )
     args = parser.parse_args()
-    main(args.config, args.model, args.output_dir)
+    main(args.config, args.model, args.output_dir, args.compare, args.enable_ttest)
