@@ -23,6 +23,7 @@ training:
   use_amp: true
   device: "cuda"
   seed: 42
+  ignore_index: 255
   warmup_epochs: 2
 experiment:
   name: "resnet50_resunet_high_source_only"

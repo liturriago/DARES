@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import yaml
 
 
@@ -190,4 +190,66 @@ class ExperimentConfig(BaseModel):
             if out_dir.startswith("/outputs"):
                 config_dict["experiment"]["output_dir"] = out_dir.lstrip("/")
 
+        return cls(**config_dict)
+
+
+class TTestTableConfig(BaseModel):
+    """Statistics and model set for one model-vs-model comparison table."""
+
+    test: Literal["wilcoxon"] = "wilcoxon"
+    alpha: float = Field(default=0.05, gt=0.0, lt=1.0)
+    min_samples: int = Field(default=8, ge=2)
+    alternative: Literal["two-sided", "greater", "less"] = "two-sided"
+    splits: list[Literal["source_test", "target_test"]] = Field(
+        default_factory=lambda: ["target_test", "source_test"]
+    )
+    metrics: list[Literal["miou", "dice"]] = Field(
+        default_factory=lambda: ["miou", "dice"]
+    )
+    output_dir: Path = Path("reports/ttest")
+    models: dict[str, str] = Field(default_factory=dict)
+    comparisons: list[list[str]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_comparisons(self) -> "TTestTableConfig":
+        """Ensures every comparison names two distinct known models."""
+        if not self.models:
+            raise ValueError("ttest.models must list at least two checkpoints.")
+        if not self.comparisons:
+            raise ValueError("ttest.comparisons must list at least one pair.")
+        for pair in self.comparisons:
+            if len(pair) != 2:
+                raise ValueError(
+                    f"each comparison must name exactly two models, got {pair}."
+                )
+            if pair[0] == pair[1]:
+                raise ValueError(
+                    f"comparison pairs must name two distinct models, got {pair}."
+                )
+            for name in pair:
+                if name not in self.models:
+                    raise ValueError(
+                        f"comparison model {name!r} is not in ttest.models "
+                        f"{sorted(self.models)}."
+                    )
+        if not self.splits:
+            raise ValueError("ttest.splits must list at least one split.")
+        if not self.metrics:
+            raise ValueError("ttest.metrics must list at least one metric.")
+        return self
+
+
+class TTestExperimentConfig(BaseModel):
+    """Global schema for the model-vs-model significance script."""
+
+    data: DataConfig
+    model: ModelConfig
+    training: TrainConfig = Field(default_factory=TrainConfig)
+    ttest: TTestTableConfig
+
+    @classmethod
+    def from_yaml(cls, yaml_path: str | Path) -> "TTestExperimentConfig":
+        """Loads and validates the t-test configuration from a YAML file."""
+        with open(yaml_path, "r") as f:
+            config_dict = yaml.safe_load(f)
         return cls(**config_dict)

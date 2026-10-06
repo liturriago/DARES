@@ -1,24 +1,33 @@
-"""Student's t-test utilities for DARES segmentation experiments.
+"""Paired significance utilities for DARES segmentation experiments.
 
-Compares per-patch mIoU score distributions without requiring SciPy:
+Compares per-patch score distributions without requiring SciPy:
 
 * ``welch_ttest`` -- independent samples, unequal variances (domain gap:
   source-test vs target-test patches).
 * ``student_ttest`` -- independent samples, pooled variance.
 * ``paired_ttest`` -- same patches scored by two checkpoints
   (``evaluate.py --compare``).
+* ``wilcoxon_signed_rank`` -- paired non-parametric test on per-patch
+  scores (``scripts/ttest.py`` model-vs-model tables). mIoU/DICE per patch
+  are bounded and skewed, so normality cannot be assumed.
 * :func:`per_sample_miou_scores` -- collects one mIoU per patch so the
   tests above have i.i.d. samples (global confusion-matrix metrics are a
-  single point and cannot feed a t-test).
+  single point and cannot feed a significance test).
+* :func:`per_sample_metric_scores` -- collects per-patch mIoU and DICE.
 * :func:`run_ttest` -- dispatcher honoring ``StatsConfig`` (``min_samples``,
   ``alpha``, ``alternative``).
+* :func:`holm_adjust` -- Holm-Bonferroni step-down correction applied
+  within each comparison table.
+* :func:`significance_stars` -- ``***``/``**``/``*``/``ns`` markers.
 
-The two-sided p-value uses the exact Student-t tail via the regularized
+The two-sided Student-t p-value uses the exact tail via the regularized
 incomplete beta function (no SciPy needed)::
 
     p_two_sided = I_{nu/(nu+t^2)}(nu/2, 1/2)
 
-Confidence intervals use bisection on that same tail.
+The Wilcoxon p-value is exact (signed-rank sum distribution via dynamic
+programming) for tie-free samples with ``n <= 50`` and uses the
+tie-corrected normal approximation with continuity correction otherwise.
 """
 
 from __future__ import annotations
@@ -434,3 +443,292 @@ def format_result(result: TTestResult) -> str:
         f"t={result.t_stat:.3f} dof={result.dof:.1f} "
         f"p={result.p_value:.4g} alpha={result.alpha} ({flag}, {result.alternative})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Wilcoxon signed-rank test (paired, non-parametric) + Holm correction.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class WilcoxonResult:
+    """Outcome of a single paired Wilcoxon signed-rank test (raw p-value)."""
+
+    test: str
+    n: int  # number of non-zero paired differences
+    n_zero: int  # number of zero differences (discarded, per Wilcoxon)
+    mean_a: float
+    mean_b: float
+    mean_diff: float
+    w_pos: float  # sum of ranks of positive differences
+    w_neg: float  # sum of ranks of negative differences
+    statistic: float  # W+ (sum of positive ranks)
+    p_value: float  # raw (uncorrected) p-value
+    alpha: float
+    alternative: str
+    method: str  # "exact" | "normal"
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-serializable view (plain floats/ints/strs)."""
+        return {
+            "test": str(self.test),
+            "n": int(self.n),
+            "n_zero": int(self.n_zero),
+            "mean_a": float(self.mean_a),
+            "mean_b": float(self.mean_b),
+            "mean_diff": float(self.mean_diff),
+            "w_pos": float(self.w_pos),
+            "w_neg": float(self.w_neg),
+            "statistic": float(self.statistic),
+            "p_value": float(self.p_value),
+            "alpha": float(self.alpha),
+            "alternative": str(self.alternative),
+            "method": str(self.method),
+        }
+
+
+def _average_ranks(values: list[float]) -> tuple[list[float], list[int]]:
+    """1-based average ranks of ``values`` plus the tie-group sizes."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    tie_groups: list[int] = []
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        avg = (i + 1 + j + 1) / 2.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        if j > i:
+            tie_groups.append(j - i + 1)
+        i = j + 1
+    return ranks, tie_groups
+
+
+def _wilcoxon_exact_p(w_obs: float, n: int, alternative: Alternative) -> float:
+    """Exact Wilcoxon p-value (tie-free ranks are exactly ``1..n``)."""
+    max_s = n * (n + 1) // 2
+    dp = [0] * (max_s + 1)
+    dp[0] = 1
+    for i in range(1, n + 1):
+        for s in range(max_s, i - 1, -1):
+            dp[s] += dp[s - i]
+    total = float(1 << n)
+    w = int(round(w_obs))
+    lo = sum(dp[s] for s in range(0, min(w, max_s) + 1)) / total
+    hi = sum(dp[s] for s in range(max(w, 0), max_s + 1)) / total
+    if alternative == "two-sided":
+        return max(0.0, min(1.0, 2.0 * min(lo, hi)))
+    if alternative == "greater":  # H1: median(a - b) > 0
+        return max(0.0, min(1.0, hi))
+    if alternative == "less":  # H1: median(a - b) < 0
+        return max(0.0, min(1.0, lo))
+    raise ValueError(f"unknown alternative {alternative!r}.")
+
+
+def _normal_cdf(z: float) -> float:
+    """Standard normal CDF via ``erf`` (stdlib only)."""
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+def _wilcoxon_normal_p(
+    w_obs: float, n: int, tie_groups: list[int], alternative: Alternative
+) -> float:
+    """Tie-corrected normal approximation with continuity correction."""
+    mean = n * (n + 1) / 4.0
+    var = (
+        n * (n + 1) * (2 * n + 1) / 24.0
+        - sum(t**3 - t for t in tie_groups) / 48.0
+    )
+    if var <= 0.0:
+        return 1.0 if w_obs == mean else 0.0
+    sd = math.sqrt(var)
+    if w_obs > mean:
+        z = (w_obs - 0.5 - mean) / sd
+    elif w_obs < mean:
+        z = (w_obs + 0.5 - mean) / sd
+    else:
+        z = 0.0
+    if alternative == "two-sided":
+        return max(0.0, min(1.0, 2.0 * (1.0 - _normal_cdf(abs(z)))))
+    if alternative == "greater":
+        return max(0.0, min(1.0, 1.0 - _normal_cdf(z)))
+    if alternative == "less":
+        return max(0.0, min(1.0, _normal_cdf(z)))
+    raise ValueError(f"unknown alternative {alternative!r}.")
+
+
+_EXACT_WILCOXON_MAX_N = 50
+
+
+def wilcoxon_signed_rank(
+    a: Sequence[float] | torch.Tensor,
+    b: Sequence[float] | torch.Tensor,
+    alpha: float = 0.05,
+    alternative: Alternative = "two-sided",
+) -> WilcoxonResult:
+    """Paired Wilcoxon signed-rank test on per-patch scores.
+
+    Scores must come from the same patches in the same order (paired).
+    Zero differences are discarded, per the Wilcoxon definition. Pixels
+    with label ``ignore_index`` must already be excluded upstream (see
+    :func:`per_sample_metric_scores`).
+
+    Args:
+        a: Scores of model A (one per patch).
+        b: Scores of model B (same patches, same order).
+        alpha: Significance level (stored for reporting; the returned
+            p-value is raw/uncorrected).
+        alternative: ``"two-sided"`` (medians differ), ``"greater"``
+            (median of ``a - b`` > 0) or ``"less"``.
+
+    Returns:
+        WilcoxonResult with the raw p-value and ``method`` (``"exact"``
+        for tie-free ``n <= 50``, ``"normal"`` otherwise).
+    """
+    xa, xb = _as_floats(a), _as_floats(b)
+    if len(xa) != len(xb):
+        raise ValueError(
+            f"wilcoxon needs equal lengths, got {len(xa)} vs {len(xb)}."
+        )
+    if len(xa) < 2:
+        raise ValueError("wilcoxon needs >= 2 pairs.")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}.")
+    diffs = [u - v for u, v in zip(xa, xb)]
+    n_zero = sum(1 for d in diffs if d == 0.0)
+    nz = [d for d in diffs if d != 0.0]
+    n = len(nz)
+    ma, mb = _mean(xa), _mean(xb)
+    if n == 0:  # identical scores: no evidence against H0
+        return WilcoxonResult(
+            test="wilcoxon",
+            n=0,
+            n_zero=n_zero,
+            mean_a=ma,
+            mean_b=mb,
+            mean_diff=0.0,
+            w_pos=0.0,
+            w_neg=0.0,
+            statistic=0.0,
+            p_value=1.0,
+            alpha=float(alpha),
+            alternative=str(alternative),
+            method="exact",
+        )
+    ranks, tie_groups = _average_ranks([abs(d) for d in nz])
+    w_pos = math.fsum(r for d, r in zip(nz, ranks) if d > 0.0)
+    w_neg = math.fsum(r for d, r in zip(nz, ranks) if d < 0.0)
+    if not tie_groups and n <= _EXACT_WILCOXON_MAX_N:
+        p = _wilcoxon_exact_p(w_pos, n, alternative)
+        method = "exact"
+    else:
+        p = _wilcoxon_normal_p(w_pos, n, tie_groups, alternative)
+        method = "normal"
+    return WilcoxonResult(
+        test="wilcoxon",
+        n=n,
+        n_zero=n_zero,
+        mean_a=ma,
+        mean_b=mb,
+        mean_diff=ma - mb,
+        w_pos=float(w_pos),
+        w_neg=float(w_neg),
+        statistic=float(w_pos),
+        p_value=float(p),
+        alpha=float(alpha),
+        alternative=str(alternative),
+        method=method,
+    )
+
+
+def holm_adjust(p_values: Sequence[float]) -> list[float]:
+    """Holm-Bonferroni step-down adjusted p-values (original order).
+
+    Args:
+        p_values: Raw p-values of one comparison table (one split × one
+            metric; e.g. 10 ablation pairs or 3 baseline pairs).
+
+    Returns:
+        Adjusted p-values in the input order, monotonically enforced and
+        capped at 1.0.
+    """
+    p = [float(v) for v in p_values]
+    if any(not 0.0 <= v <= 1.0 or math.isnan(v) for v in p):
+        raise ValueError("holm_adjust needs p-values in [0, 1].")
+    m = len(p)
+    order = sorted(range(m), key=lambda i: p[i])
+    adjusted = [0.0] * m
+    running = 0.0
+    for rank, idx in enumerate(order):
+        running = max(running, (m - rank) * p[idx])
+        adjusted[idx] = min(1.0, running)
+    return adjusted
+
+
+def significance_stars(p_value: float) -> str:
+    """``***``/``**``/``*``/``ns`` marker for an (adjusted) p-value."""
+    p = float(p_value)
+    if p < 0.001:
+        return "***"
+    if p < 0.01:
+        return "**"
+    if p < 0.05:
+        return "*"
+    return "ns"
+
+
+@torch.no_grad()
+def per_sample_metric_scores(
+    model: torch.nn.Module,
+    loader: Any,
+    device: torch.device,
+    num_classes: int,
+    ignore_index: int = 255,
+    use_amp: bool = False,
+) -> dict[str, list[float]]:
+    """Collects per-patch mIoU and DICE (``ignore_index`` pixels excluded).
+
+    Args:
+        model: Segmentation model (``mode='class'``).
+        loader: Labeled loader (test split).
+        device: Computing device.
+        num_classes: Number of output classes.
+        ignore_index: Label value excluded from the per-patch metrics
+            (``255`` for water/NoData pixels).
+        use_amp: Whether to run inference under AMP.
+
+    Returns:
+        ``{"miou": [...], "dice": [...]}`` with one entry per patch in
+        loader order (unlabeled batches are skipped).
+    """
+    from dares.utils.metrics import MetricTracker
+
+    model.eval()
+    miou_scores: list[float] = []
+    dice_scores: list[float] = []
+    for batch in loader:
+        imgs, labels = batch[0].to(device), batch[1]
+        if labels is None:
+            continue
+        with autocast(device_type=device.type, enabled=use_amp):
+            logits = model(imgs, mode="class")
+        preds = torch.argmax(logits, dim=1).cpu()
+        labs = labels.long().cpu()
+        for i in range(preds.shape[0]):
+            _, miou = MetricTracker.compute_iou(
+                preds[i].reshape(-1),
+                labs[i].reshape(-1),
+                num_classes,
+                ignore_index=ignore_index,
+            )
+            _, dice = MetricTracker.compute_dice(
+                preds[i].reshape(-1),
+                labs[i].reshape(-1),
+                num_classes,
+                ignore_index=ignore_index,
+            )
+            miou_scores.append(float(miou))
+            dice_scores.append(float(dice))
+    return {"miou": miou_scores, "dice": dice_scores}
