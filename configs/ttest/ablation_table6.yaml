@@ -27,10 +27,10 @@ ttest:
   output_dir: "reports/ttest/ablation_table6"
   models:
     complete: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares.pth"
-    no_align: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_align.pth"
-    no_anticollapse: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_anti_collapse.pth"
-    no_repulsion: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_repulsion.pth"
-    no_em: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_em.pth"
+    no_align: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_no_align.pth"
+    no_anticollapse: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_no_anti_collapse.pth"
+    no_repulsion: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_no_repulsion.pth"
+    no_em: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_no_em.pth"
   comparisons:
     - ["complete", "no_align"]
     - ["complete", "no_anticollapse"]
