@@ -26,10 +26,10 @@ ttest:
   metrics: ["miou", "dice"]
   output_dir: "reports/ttest/baselines_table3"
   models:
-    dares: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares.pth"
-    source_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/source_only.pth"
-    advent: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/advent.pth"
-    cbst: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/cbst.pth"
+    dares: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/dares.pth"
+    source_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/source_only.pth"
+    advent: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/advent.pth"
+    cbst: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/cbst.pth"
   comparisons:
     - ["dares", "source_only"]
     - ["dares", "advent"]

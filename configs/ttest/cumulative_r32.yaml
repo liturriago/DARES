@@ -30,12 +30,12 @@ ttest:
   metrics: ["miou", "dice"]
   output_dir: "reports/ttest/cumulative_r32"
   models:
-    source_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/source_only.pth"
-    em_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_em_only.pth"
-    align_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_align_only.pth"
-    em_align: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_em_align.pth"
-    em_align_ac: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_em_align_ac.pth"
-    complete: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares.pth"
+    source_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/source_only.pth"
+    em_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/dares_em_only.pth"
+    align_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/dares_align_only.pth"
+    em_align: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/dares_em_align.pth"
+    em_align_ac: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/dares_em_align_ac.pth"
+    complete: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/3/dares.pth"
   comparisons:
     - ["source_only", "em_only"]
     - ["source_only", "align_only"]
