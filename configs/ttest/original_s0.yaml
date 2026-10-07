@@ -1,0 +1,39 @@
+data:
+  source_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Source"
+  target_dir: "/kaggle/input/datasets/lucasiturriago/dares-amazon-uda/Target_Original"
+  target_variant: "original"
+  batch_size: 8
+  patch_size: 224
+  num_workers: 4
+  mean: [0.0, 0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0, 1.0]
+  use_augmentation: false
+
+model:
+  backbone: "resnet50"
+  head: "resunet"
+  in_channels: 4
+  num_classes: 2
+  pretrained: false
+  dropout_rate: 0.0
+
+# R3-5 (unperturbed target, s=0): paired per-patch Wilcoxon + Holm at the
+# clean/original target condition. Inference only: no retraining. Requires the
+# s=0 checkpoints to be uploaded to the Kaggle model dataset with these names.
+ttest:
+  test: "wilcoxon"
+  alpha: 0.05
+  min_samples: 8
+  alternative: "two-sided"
+  splits: ["target_test", "source_test"]
+  metrics: ["miou", "dice"]
+  output_dir: "reports/ttest/original_s0"
+  models:
+    dares: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares_original.pth"
+    source_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/source_only_original.pth"
+    advent: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/advent_original.pth"
+    cbst: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/cbst_original.pth"
+  comparisons:
+    - ["dares", "source_only"]
+    - ["dares", "advent"]
+    - ["dares", "cbst"]
