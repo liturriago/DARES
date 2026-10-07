@@ -26,11 +26,11 @@ ttest:
   metrics: ["miou", "dice"]
   output_dir: "reports/ttest/ablation_table6"
   models:
-    complete: "outputs/LIME_stress/medium/dares/experiment_1/model_final.pth"
-    no_align: "outputs/ablation/dares_no_align/experiment_1/model_final.pth"
-    no_anticollapse: "outputs/ablation/dares_no_anti_collapse/experiment_1/model_final.pth"
-    no_repulsion: "outputs/ablation/dares_no_repulsion/experiment_1/model_final.pth"
-    no_em: "outputs/ablation/dares_no_em/experiment_1/model_final.pth"
+    complete: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares.pth"
+    no_align: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_align.pth"
+    no_anticollapse: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_anti_collapse.pth"
+    no_repulsion: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_repulsion.pth"
+    no_em: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/no_em.pth"
   comparisons:
     - ["complete", "no_align"]
     - ["complete", "no_anticollapse"]

@@ -26,10 +26,10 @@ ttest:
   metrics: ["miou", "dice"]
   output_dir: "reports/ttest/baselines_table3"
   models:
-    dares: "outputs/LIME_stress/medium/dares/experiment_1/model_final.pth"
-    source_only: "outputs/LIME_stress/medium/source_only/experiment_1/model_final.pth"
-    advent: "outputs/LIME_stress/medium/advent/experiment_1/model_final.pth"
-    cbst: "outputs/LIME_stress/medium/cbst/experiment_1/model_final.pth"
+    dares: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/dares.pth"
+    source_only: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/source_only.pth"
+    advent: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/advent.pth"
+    cbst: "/kaggle/input/models/lucasiturriago/dares/pytorch/default/1/cbst.pth"
   comparisons:
     - ["dares", "source_only"]
     - ["dares", "advent"]
